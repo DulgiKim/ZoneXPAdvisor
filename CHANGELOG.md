@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.1 (Beta)
+
+### English
+- Kill-time measurement now ignores time that isn't hunting:
+  - Going AFK breaks the measurement.
+  - Time with a vendor, mail, quest, gossip, trainer, auction, bank or flight-map window open is removed.
+  - Standing still out of combat with full health and mana for more than 15 seconds is removed (resting to recover health or mana still counts).
+  - Kills in towns and inns are skipped; kills in a group are skipped by default (toggle in settings).
+- Settings → Kill time shows how much pause time was removed and how many kills were skipped.
+- Tip: press "Clear measurements" once so older samples recorded before this filter are replaced.
+- About tab links to the GitHub project page.
+
+### 한국어
+- 전투 시간 측정에서 사냥이 아닌 시간을 뺍니다:
+  - 자리 비움(AFK) 상태가 되면 측정을 끊습니다.
+  - 상인, 우편함, 퀘스트, 대화, 훈련사, 경매장, 은행, 비행 경로 창을 연 시간을 뺍니다.
+  - 전투 밖에서 체력과 마나가 가득 찬 채로 15초 넘게 가만히 있던 시간을 뺍니다 (체력/마나 회복을 위한 휴식은 그대로 계산).
+  - 마을과 여관에서 잡은 몬스터는 기록하지 않고, 파티 중 처치도 기본으로 건너뜁니다 (설정에서 변경 가능).
+- 설정 → 전투 시간 탭에서 뺀 대기 시간과 건너뛴 기록 수를 보여줍니다.
+- 팁: 이 필터가 생기기 전의 기록을 정리하려면 "측정 기록 지우기"를 한 번 눌러주세요.
+- 정보 탭에 GitHub 프로젝트 링크를 추가했습니다.
+
 ## 0.4.0 (Beta)
 
 First public release.
