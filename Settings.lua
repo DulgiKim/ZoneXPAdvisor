@@ -11,10 +11,10 @@ ns.Settings = Settings
 -- Link shown on the About tab. An empty string hides the row.
 local PROJECT_URL = "https://github.com/DulgiKim/ZoneXPAdvisor"
 
-local WIDTH, HEIGHT = 480, 400
+local WIDTH, HEIGHT = 500, 500
 local TAB_KEYS = { "general", "killtime", "about" }
 
-local frame, tabs, pages, killStatus, modeButtons, minimapCheck
+local frame, tabs, pages, killStatus, killStats, soloCheck, modeButtons, minimapCheck
 
 local function Metadata(key)
     local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
@@ -120,14 +120,23 @@ end
 
 local function RefreshKillTime()
     if not killStatus then return end
+    local KT = ns.KillTimer
     killStatus:SetText(ns.UI.KillTimeText())
-    local mode = ns.KillTimer and ns.KillTimer.GetMode() or "events"
+    local mode = KT and KT.GetMode() or "events"
     for key, rb in pairs(modeButtons) do rb:SetChecked(key == mode) end
+    if KT then
+        local stats = KT.Stats()
+        local s = stats.skipped or {}
+        killStats:SetText(string.format(L.SET_KT_STATS, math.floor(stats.excluded / 60 + 0.5),
+            s.afk or 0, s.long or 0, s.resting or 0, s.group or 0))
+        soloCheck:SetChecked(KT.GetSoloOnly())
+    end
 end
 
 local function BuildKillTime(page)
     local title = SectionTitle(page, L.SET_KT_TITLE)
     local intro = Paragraph(page, L.SET_KT_INTRO, title)
+    intro = Paragraph(page, L.SET_KT_FILTERS, intro, -6)
 
     local methodTitle = SectionTitle(page, L.SET_KT_METHOD, intro, -14)
     modeButtons = {}
@@ -155,12 +164,19 @@ local function BuildKillTime(page)
     killStatus:SetPoint("TOPLEFT", statusTitle, "BOTTOMLEFT", 0, -6)
     killStatus:SetTextColor(0.6, 0.85, 1)
 
+    killStats = Paragraph(page, "", killStatus, -4)
+
+    soloCheck = CheckBox(page, L.SET_KT_SOLO, function(checked)
+        if ns.KillTimer then ns.KillTimer.SetSoloOnly(checked) end
+    end)
+    soloCheck:SetPoint("TOPLEFT", killStats, "BOTTOMLEFT", -4, -8)
+
     local reset = ns.UI.CreateButton(page, 170, L.SET_KT_RESET, function()
         if ns.KillTimer then ns.KillTimer.Reset() end
         ns.UI.Print(L.KT_RESET)
         RefreshKillTime()
     end)
-    reset:SetPoint("TOPLEFT", killStatus, "BOTTOMLEFT", 0, -10)
+    reset:SetPoint("TOPLEFT", soloCheck, "BOTTOMLEFT", 4, -8)
 end
 
 local function BuildAbout(page)

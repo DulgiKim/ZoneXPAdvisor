@@ -13,6 +13,15 @@
 --             on clients whose message wording can't be matched.
 -- The full combat log (COMBAT_LOG_EVENT_*) is NOT used: WoW Forever closes it to addons and
 -- blocks an addon that registers for it.
+--
+-- Time that isn't hunting is taken out of each gap, so AFK breaks don't skew the median:
+--   * AFK flag: breaks the chain.
+--   * Open vendor / mail / quest / gossip / trainer / auction / bank / flight-map windows:
+--     the time they are open is subtracted (quest talking is counted separately in routes).
+--   * Standing still out of combat with full health and mana for more than IDLE_GRACE
+--     seconds: subtracted. Standing still while health or mana recovers is real downtime and
+--     stays in.
+--   * Rest areas (inns, cities) and, optionally, party play: the kill isn't recorded.
 
 local ADDON_NAME, ns = ...
 
@@ -27,6 +36,10 @@ local LEVEL_FACTOR = 0.08   -- each level the mob is above you adds ~8% fight ti
 local ELITE_FACTOR = 2.5    -- elites take much longer than their double XP suggests
 local MERGE_WINDOW = 3      -- seconds: PARTY_KILL and UNIT_DIED for the same mob are one kill
 local TARGET_WINDOW = 5     -- seconds: a targeted mob dying this soon after combat counts as ours
+local IDLE_GRACE = 15       -- seconds of idling with full resources before it counts as a pause
+local FULL = 0.98           -- health/mana share treated as "full"
+local MAX_RAW_GAP = 600     -- seconds; even after removing pauses, longer gaps are discarded
+local TICK = 1              -- seconds between pause checks
 
 KillTimer.MIN_SAMPLES = MIN_SAMPLES
 KillTimer.MODES = { "events", "xp" }
@@ -34,6 +47,10 @@ KillTimer.MODES = { "events", "xp" }
 local lastKillTime, lastKillZone
 local recentDeaths = {}     -- guid -> time, to merge duplicate death reports
 local lastTargetGUID, lastCombatTime
+local pausedSinceKill = 0   -- seconds of non-hunting time since the last kill
+local idleRun = 0           -- consecutive seconds of idling with full resources
+local openWindows = {}      -- interaction windows currently open (vendor, mail, ...)
+local wasAFK = false
 
 ---------------------------------------------------------------------------------------------
 -- Helpers
@@ -66,6 +83,7 @@ local function Settings()
     ZoneXPAdvisorDB = ZoneXPAdvisorDB or {}
     local db = ZoneXPAdvisorDB
     if db.killDetect ~= "events" and db.killDetect ~= "xp" then db.killDetect = "events" end
+    if db.killSoloOnly == nil then db.killSoloOnly = true end
     return db
 end
 
@@ -80,11 +98,18 @@ local function CharacterStore()
         store = { samples = {} }
         db.killTimes[key] = store
     end
+    store.skipped = store.skipped or { afk = 0, group = 0, resting = 0, long = 0 }
     return store
 end
 
 local function BreakChain()
     lastKillTime, lastKillZone = nil, nil
+    pausedSinceKill, idleRun = 0, 0
+end
+
+local function CountSkip(reason)
+    local skipped = CharacterStore().skipped
+    skipped[reason] = (skipped[reason] or 0) + 1
 end
 
 --- "Creature-0-1234-0-56-6-0000ABCDEF" -> 6 (the NPC ID), or nil for players/pets.
@@ -122,22 +147,99 @@ end
 --- Records one kill. mobLevel may be nil (treated as same level); elite kills only advance
 --- the chain, because their fight time says nothing about normal mobs.
 local function RecordKill(mobLevel, elite)
+    -- Kills in towns and in groups don't reflect solo questing pace.
+    if IsResting and IsResting() then
+        CountSkip("resting")
+        BreakChain()
+        return
+    end
+    if Settings().killSoloOnly and IsInGroup and IsInGroup() then
+        CountSkip("group")
+        BreakChain()
+        return
+    end
+
     local now = GetTime()
     local zone = GetRealZoneText and GetRealZoneText() or ""
     local playerLevel = UnitLevel("player")
 
     if lastKillTime and zone == lastKillZone then
-        local gap = now - lastKillTime
-        if gap >= MIN_GAP and gap <= MAX_GAP and not elite then
+        local raw = now - lastKillTime
+        local gap = raw - pausedSinceKill
+        if raw > MAX_RAW_GAP or gap > MAX_GAP then
+            CountSkip("long")
+        elseif gap >= MIN_GAP and not elite then
             -- Normalise to a same-level mob so samples from different mobs are comparable.
             local diff = mobLevel and (mobLevel - playerLevel) or 0
             local samples = CharacterStore().samples
-            samples[#samples + 1] = { gap / LevelMultiplier(diff), playerLevel }
+            samples[#samples + 1] = { gap / LevelMultiplier(diff), playerLevel, pausedSinceKill }
             while #samples > MAX_SAMPLES do table.remove(samples, 1) end
         end
     end
     lastKillTime, lastKillZone = now, zone
+    pausedSinceKill, idleRun = 0, 0
+    wipe(openWindows) -- a kill means no vendor or mail window is in use
 end
+
+---------------------------------------------------------------------------------------------
+-- Pause detection
+---------------------------------------------------------------------------------------------
+
+local function Ratio(current, maximum)
+    current, maximum = Plain(current), Plain(maximum)
+    if not current or not maximum or maximum <= 0 then return nil end
+    return current / maximum
+end
+
+--- Standing still, out of combat, with nothing left to recover: not hunting.
+--- Any value the client won't reveal makes this false, so unknowns never remove time.
+local function IdleWithFullResources()
+    if InCombatLockdown() or (UnitAffectingCombat and UnitAffectingCombat("player")) then return false end
+    local speed = GetUnitSpeed and Plain(GetUnitSpeed("player"))
+    if speed == nil or speed > 0 then return false end
+    local health = Ratio(UnitHealth("player"), UnitHealthMax("player"))
+    if not health or health < FULL then return false end
+    local powerType = UnitPowerType and UnitPowerType("player")
+    if powerType == 0 then -- mana users also rest for mana
+        local mana = Ratio(UnitPower("player", 0), UnitPowerMax("player", 0))
+        if not mana or mana < FULL then return false end
+    end
+    return true
+end
+
+local function Tick()
+    local afk = UnitIsAFK and UnitIsAFK("player") and true or false
+    if afk and not wasAFK then
+        if lastKillTime then CountSkip("afk") end
+        BreakChain()
+    end
+    wasAFK = afk
+    if not lastKillTime then return end
+
+    if next(openWindows) then
+        pausedSinceKill = pausedSinceKill + TICK
+        idleRun = 0
+    elseif IdleWithFullResources() then
+        idleRun = idleRun + TICK
+        if idleRun > IDLE_GRACE then pausedSinceKill = pausedSinceKill + TICK end
+    else
+        idleRun = 0
+    end
+end
+
+if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(TICK, Tick) end
+
+local WINDOW_OPEN = {
+    MERCHANT_SHOW = "merchant", MAIL_SHOW = "mail", GOSSIP_SHOW = "gossip",
+    QUEST_GREETING = "quest", QUEST_DETAIL = "quest", QUEST_PROGRESS = "quest", QUEST_COMPLETE = "quest",
+    TRAINER_SHOW = "trainer", AUCTION_HOUSE_SHOW = "auction", BANKFRAME_OPENED = "bank",
+    TAXIMAP_OPENED = "taxi",
+}
+local WINDOW_CLOSE = {
+    MERCHANT_CLOSED = "merchant", MAIL_CLOSED = "mail", GOSSIP_CLOSED = "gossip",
+    QUEST_FINISHED = "quest", TRAINER_CLOSED = "trainer", AUCTION_HOUSE_CLOSED = "auction",
+    BANKFRAME_CLOSED = "bank", TAXIMAP_CLOSED = "taxi",
+}
 
 --- Level and elite status of the dead target, when it is still targeted.
 local function DeadTargetInfo()
@@ -236,7 +338,25 @@ function KillTimer.SecondsPerKill(playerLevel, mobLevel, rank)
 end
 
 function KillTimer.Reset()
-    CharacterStore().samples = {}
+    local store = CharacterStore()
+    store.samples = {}
+    store.skipped = { afk = 0, group = 0, resting = 0, long = 0 }
+    BreakChain()
+end
+
+--- What the filters removed: seconds of pauses taken out of the kept samples, and how many
+--- kills were skipped for each reason since the last reset.
+function KillTimer.Stats()
+    local store = CharacterStore()
+    local excluded = 0
+    for _, s in ipairs(store.samples) do excluded = excluded + (s[3] or 0) end
+    return { excluded = excluded, samples = #store.samples, skipped = store.skipped }
+end
+
+function KillTimer.GetSoloOnly() return Settings().killSoloOnly end
+
+function KillTimer.SetSoloOnly(value)
+    Settings().killSoloOnly = value and true or false
     BreakChain()
 end
 
@@ -262,10 +382,16 @@ for _, event in ipairs({
     -- Events that don't exist on a client raise an error; skip them instead of failing.
     pcall(events.RegisterEvent, events, event)
 end
+for event in pairs(WINDOW_OPEN) do pcall(events.RegisterEvent, events, event) end
+for event in pairs(WINDOW_CLOSE) do pcall(events.RegisterEvent, events, event) end
 
 events:SetScript("OnEvent", function(_, event, arg1, arg2)
     local mode = Settings().killDetect
-    if event == "CHAT_MSG_COMBAT_XP_GAIN" then
+    if WINDOW_OPEN[event] then
+        openWindows[WINDOW_OPEN[event]] = true
+    elseif WINDOW_CLOSE[event] then
+        openWindows[WINDOW_CLOSE[event]] = nil
+    elseif event == "CHAT_MSG_COMBAT_XP_GAIN" then
         if mode == "xp" then OnXPMessage(arg1) end
     elseif event == "PARTY_KILL" then
         -- PARTY_KILL: attacker GUID, victim GUID. Count only our own (or our pet's) killing blows.
@@ -281,10 +407,14 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
         if guid and UnitCanAttack and UnitCanAttack("player", "target") then lastTargetGUID = guid end
     elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
         lastCombatTime = GetTime()
+        -- Combat means no vendor/mail window is being used; drop any whose close event was missed.
+        if event == "PLAYER_REGEN_DISABLED" then wipe(openWindows) end
     else
+        wipe(openWindows)
         BreakChain()
     end
 end)
 
 -- Exposed for tests.
 KillTimer._OnEvent = events:GetScript("OnEvent")
+KillTimer._Tick = Tick
