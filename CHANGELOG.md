@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2 (Beta)
+
+### English
+- About tab: GitHub, CurseForge and Discord buttons. Clicking one shows the link ready to copy with Ctrl+C.
+
+### 한국어
+- 정보 탭에 GitHub, CurseForge, Discord 버튼을 추가했습니다. 누르면 Ctrl+C로 바로 복사할 수 있는 링크 창이 뜹니다.
+
 ## 0.4.1 (Beta)
 
 ### English

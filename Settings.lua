@@ -12,7 +12,7 @@ ns.Settings = Settings
 local LINKS = {
     { label = "GitHub", url = "https://github.com/DulgiKim/ZoneXPAdvisor", color = { 0.9, 0.9, 0.9 } },
     { label = "CurseForge", url = "https://www.curseforge.com/wow/addons/zonexp-advisor", color = { 0.96, 0.46, 0.21 } },
-    { label = "Discord", url = "https://discord.gg/tuA8Jn2Cp", color = { 0.55, 0.6, 1 } },
+    { label = "Discord", url = "https://discord.gg/yEf4RJbA3Y", color = { 0.55, 0.6, 1 } },
 }
 
 local WIDTH, HEIGHT = 500, 500
