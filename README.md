@@ -50,10 +50,6 @@ Built for **World of Warcraft Forever** (Interface 16001). Works for both **Alli
 
 ZoneXP Advisor is an independent project and is not affiliated with or endorsed by the Questie team.
 
-## Support
-
-If you enjoy the addon, you can support development on Ko-fi (link coming soon). Donations are optional and unlock nothing.
-
 ## License
 
 [GPL-3.0](LICENSE)

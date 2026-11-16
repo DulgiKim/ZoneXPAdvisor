@@ -8,9 +8,8 @@ local L = ns.L
 local Settings = {}
 ns.Settings = Settings
 
--- Links shown on the About tab. Empty strings hide the row.
+-- Link shown on the About tab. An empty string hides the row.
 local PROJECT_URL = "https://github.com/DulgiKim/ZoneXPAdvisor"
-local DONATE_URL = ""
 
 local WIDTH, HEIGHT = 480, 400
 local TAB_KEYS = { "general", "killtime", "about" }
@@ -198,8 +197,7 @@ local function BuildAbout(page)
         anchor = box
     end
     LinkRow(L.SET_PROJECT_LINK, PROJECT_URL)
-    LinkRow(L.SET_DONATE_LINK, DONATE_URL, { 1, 0.6, 0.75 })
-    if (PROJECT_URL ~= "" or DONATE_URL ~= "") then
+    if PROJECT_URL ~= "" then
         local hint = Paragraph(page, L.SET_COPY_HINT, anchor, -6)
         hint:ClearAllPoints()
         hint:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", -6, -6)
