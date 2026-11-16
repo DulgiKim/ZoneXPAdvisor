@@ -8,8 +8,12 @@ local L = ns.L
 local Settings = {}
 ns.Settings = Settings
 
--- Link shown on the About tab. An empty string hides the row.
-local PROJECT_URL = "https://github.com/DulgiKim/ZoneXPAdvisor"
+-- Link buttons on the About tab. A link with an empty url gets no button.
+local LINKS = {
+    { label = "GitHub", url = "https://github.com/DulgiKim/ZoneXPAdvisor", color = { 0.9, 0.9, 0.9 } },
+    { label = "CurseForge", url = "", color = { 0.96, 0.46, 0.21 } },
+    { label = "Discord", url = "", color = { 0.55, 0.6, 1 } },
+}
 
 local WIDTH, HEIGHT = 500, 500
 local TAB_KEYS = { "general", "killtime", "about" }
@@ -73,21 +77,53 @@ local function RadioButton(parent, text, onClick)
     return rb
 end
 
---- Read-only text box the player can select and copy (Ctrl+C); the game can't open URLs.
-local function CopyBox(parent, text, width)
-    local box = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    box:SetSize(width or 300, 22)
-    box:SetAutoFocus(false)
-    box:SetText(text)
-    box:SetCursorPosition(0)
-    box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
-    box:SetScript("OnEditFocusLost", function(self) self:HighlightText(0, 0) end)
-    box:SetScript("OnTextChanged", function(self, userInput)
-        if userInput then self:SetText(text) self:HighlightText() end
-    end)
-    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    return box
+---------------------------------------------------------------------------------------------
+-- Link popup: the game can't open a browser, so the URL is shown selected for Ctrl+C.
+---------------------------------------------------------------------------------------------
+
+local POPUP = "ZONEXPADVISOR_COPY_URL"
+
+local function PopupEditBox(popup)
+    if popup.GetEditBox then return popup:GetEditBox() end
+    return popup.editBox or popup.EditBox
+end
+
+if StaticPopupDialogs then
+    StaticPopupDialogs[POPUP] = {
+        text = "%s",
+        button1 = CLOSE or OKAY or "OK",
+        hasEditBox = 1,
+        editBoxWidth = 320,
+        timeout = 0,
+        whileDead = 1,
+        hideOnEscape = 1,
+        preferredIndex = 3,
+        OnShow = function(self, data)
+            local box = PopupEditBox(self)
+            if box and data then
+                box:SetText(data)
+                box:SetFocus()
+                box:HighlightText()
+            end
+        end,
+        EditBoxOnTextChanged = function(box, data)
+            -- Keep the URL intact if the player types into the box.
+            if data and box:GetText() ~= data then
+                box:SetText(data)
+                box:HighlightText()
+            end
+        end,
+        EditBoxOnEnterPressed = function(box) box:GetParent():Hide() end,
+        EditBoxOnEscapePressed = function(box) box:GetParent():Hide() end,
+    }
+end
+
+local function ShowLink(link)
+    if StaticPopup_Show and StaticPopupDialogs and StaticPopupDialogs[POPUP] then
+        StaticPopup_Show(POPUP, string.format(L.SET_LINK_POPUP, link.label), nil, link.url)
+    else
+        ns.UI.Print(link.label .. ": " .. link.url)
+    end
 end
 
 ---------------------------------------------------------------------------------------------
@@ -203,21 +239,30 @@ local function BuildAbout(page)
     local about = SectionTitle(page, L.SET_ABOUT_TITLE, spacer, -8)
     local desc = Paragraph(page, L.SET_ABOUT_TEXT, about)
 
-    local anchor = desc
-    local function LinkRow(labelText, url, color)
-        if not url or url == "" then return end
-        local label = SectionTitle(page, labelText, anchor, -16)
-        if color then label:SetTextColor(color[1], color[2], color[3]) end
-        local box = CopyBox(page, url, WIDTH - 60)
-        box:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 6, -4)
-        anchor = box
-    end
-    LinkRow(L.SET_PROJECT_LINK, PROJECT_URL)
-    if PROJECT_URL ~= "" then
-        local hint = Paragraph(page, L.SET_COPY_HINT, anchor, -6)
-        hint:ClearAllPoints()
-        hint:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", -6, -6)
-        hint:SetPoint("RIGHT", page, "RIGHT", -16, 0)
+    -- Link buttons: one per configured URL, in a row. Clicking shows the URL ready to copy.
+    local linksTitle = SectionTitle(page, L.SET_LINKS_TITLE, desc, -18)
+    local previous
+    for _, link in ipairs(LINKS) do
+        if link.url ~= "" then
+            local button = ns.UI.CreateButton(page, 130, link.label, function() ShowLink(link) end)
+            if previous then
+                button:SetPoint("LEFT", previous, "RIGHT", 8, 0)
+            else
+                button:SetPoint("TOPLEFT", linksTitle, "BOTTOMLEFT", 0, -8)
+            end
+            local color = link.color
+            local text = button.GetFontString and button:GetFontString()
+            if color and text then text:SetTextColor(color[1], color[2], color[3]) end
+            button:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:AddLine(link.label, 1, 0.82, 0)
+                GameTooltip:AddLine(link.url, 1, 1, 1)
+                GameTooltip:AddLine(L.SET_LINK_HINT, 0.6, 0.6, 0.6, true)
+                GameTooltip:Show()
+            end)
+            button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            previous = button
+        end
     end
 
     local thanks = Label(page, L.SET_THANKS, "GameFontNormalSmall")
