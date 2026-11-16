@@ -13,7 +13,8 @@ Built for **World of Warcraft Forever** (Interface 16001). Works for both **Alli
 ## Download
 
 - **[Latest release](../../releases/latest)** — download `ZoneXPAdvisor-x.y.z.zip`
-- Also on CurseForge (after review)
+- **[CurseForge](https://www.curseforge.com/wow/addons/zonexp-advisor)**
+- Questions and feedback: **[Discord](https://discord.gg/tuA8Jn2Cp)**
 
 ### Install
 
@@ -84,4 +85,4 @@ ZoneXP Advisor is an independent project and is not affiliated with or endorsed 
 
 **QuestieDB**(권장, Questie와 함께 설치됨)의 공개 API로 데이터를 읽습니다. 이 애드온에는 QuestieDB 데이터가 포함되어 있지 않으며, Questie 팀과 관련이 없습니다.
 
-버그나 이상한 추천은 [Issues](../../issues)에 레벨, 직업, 진영, 지역, `/zxp debug` 결과와 함께 남겨주세요.
+버그나 이상한 추천은 [Issues](../../issues)나 [Discord](https://discord.gg/tuA8Jn2Cp)에 레벨, 직업, 진영, 지역, `/zxp debug` 결과와 함께 남겨주세요. CurseForge: https://www.curseforge.com/wow/addons/zonexp-advisor
