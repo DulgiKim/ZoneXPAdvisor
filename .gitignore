@@ -1,0 +1,4 @@
+# Release archives are attached to GitHub releases, not committed
+*.zip
+Thumbs.db
+desktop.ini
