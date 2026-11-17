@@ -42,6 +42,9 @@ local FLIGHT_SPEED = 32       -- yards/second on a flight path
 local FLIGHT_OVERHEAD = 120   -- seconds: reaching the flight master, landing, walking to the hub
 local FLIGHT_PATH_FACTOR = 1.4 -- flight routes are not straight lines
 local OTHER_CONTINENT = 15 * 60 -- boat or zeppelin: waiting, sailing and travelling on
+-- Round trip to another zone for objectives that are not in the quest's zone, when the
+-- client can't tell where that zone is.
+local DEFAULT_AWAY_TRIP = 10 * 60
 
 --- Seconds per kill of one NPC including downtime. Uses this character's measured pace
 --- (KillTimer.lua) once enough kills are recorded, adjusted for the mob's level and rank.
@@ -152,6 +155,19 @@ local function DensestCluster(points)
         end
     end
     return bestX, bestY
+end
+
+--- The area id where an NPC or object has the most spawns.
+local function MainSpawnArea(data, kind, id)
+    local source = kind == "object" and data.Object or data.Npc
+    local spawns = source and source.spawns(id)
+    if type(spawns) ~= "table" then return nil end
+    local best, bestCount
+    for areaId, coords in pairs(spawns) do
+        local n = type(coords) == "table" and #coords or 0
+        if n > 0 and (not bestCount or n > bestCount) then best, bestCount = areaId, n end
+    end
+    return best
 end
 
 local function FirstSpawn(data, kind, ids, zone)
@@ -276,6 +292,8 @@ end
 local function BuildNodes(zone, ctx, data, width, height)
     local Q = data.Quest
     local nodes = {}
+    -- Objectives done in another zone: their fighting time and the zones you must travel to.
+    local away = { time = 0, quests = 0, areas = {} }
     local turnInOf = {} -- questId -> node index
     local pickupOf = {}
 
@@ -310,21 +328,30 @@ local function BuildNodes(zone, ctx, data, width, height)
 
         -- Objectives
         local objectiveNodes = {}
+        local awayQuest = false
         if quest.status ~= "ready" and type(quest.targets) == "table" then
             for _, target in ipairs(quest.targets) do
+                local duration
+                if target.kind == "object" then
+                    duration = target.count * OBJECT_TIME
+                else
+                    duration = target.count * KillTime(data, ctx.playerLevel, target.id)
+                end
                 local points = SpawnsInZone(data, target.kind, target.id, zone.zoneId)
                 if points then
                     local x, y = DensestCluster(points)
-                    local duration
-                    if target.kind == "object" then
-                        duration = target.count * OBJECT_TIME
-                    else
-                        duration = target.count * KillTime(data, ctx.playerLevel, target.id)
-                    end
                     objectiveNodes[#objectiveNodes + 1] = Add(x, y, duration, preds, id, "objective", target)
+                else
+                    -- The mobs live in another zone (e.g. a city quest sending you elsewhere):
+                    -- the fighting still takes time, plus a trip there and back.
+                    away.time = away.time + duration
+                    awayQuest = true
+                    local area = MainSpawnArea(data, target.kind, target.id)
+                    if area then away.areas[area] = true else away.unknown = true end
                 end
             end
         end
+        if awayQuest then away.quests = away.quests + 1 end
 
         -- Turn-in
         local finishedBy = Q.finishedBy(id)
@@ -363,7 +390,7 @@ local function BuildNodes(zone, ctx, data, width, height)
     -- a cycle when one quest unlocks the other; then only same-quest objectives are merged.
     local merged = MergeCamps(nodes, false)
     if HasCycle(merged) and not HasCycle(nodes) then merged = MergeCamps(nodes, true) end
-    return merged
+    return merged, away
 end
 
 ---------------------------------------------------------------------------------------------
@@ -577,6 +604,30 @@ local function ApproachTime(zone, ctx, data, hx, hy, width, height)
     return min(ground, flight)
 end
 
+--- Time for objectives outside the zone: their fighting time plus a round trip to each other
+--- zone involved (flight or running on the same continent, boat otherwise).
+local function AwayTime(away, zone, ctx, data)
+    if not away or away.quests == 0 then return 0 end
+    local total = away.time
+    local zc, zx, zy = WorldPos(UiMapFor(zone.zoneId, data), 0.5, 0.5)
+    local speed = ctx.playerLevel >= MOUNT_LEVEL and MOUNT_SPEED or RUN_SPEED
+    for area in pairs(away.areas) do
+        local trip = DEFAULT_AWAY_TRIP
+        local ac, ax, ay = WorldPos(UiMapFor(area, data), 0.5, 0.5)
+        if zc and ac then
+            if zc ~= ac then
+                trip = 2 * OTHER_CONTINENT
+            else
+                local d = sqrt((ax - zx) ^ 2 + (ay - zy) ^ 2)
+                trip = 2 * min(d * PATH_FACTOR / speed, FLIGHT_OVERHEAD + d * FLIGHT_PATH_FACTOR / FLIGHT_SPEED)
+            end
+        end
+        total = total + trip
+    end
+    if away.unknown then total = total + DEFAULT_AWAY_TRIP end
+    return total
+end
+
 --- Quests in the order the route finishes them (last node of each quest), so the level-up
 --- simulation hands out XP in the order it is earned. Quests without nodes go last.
 local function QuestsInRouteOrder(zone, nodes, order)
@@ -663,7 +714,7 @@ function Route.Compute(zone, ctx, yield)
     if not data.Quest or type(zone.zoneId) ~= "number" then return end
 
     local width, height = ZoneSize(zone.zoneId, data)
-    local nodes = BuildNodes(zone, ctx, data, width, height)
+    local nodes, away = BuildNodes(zone, ctx, data, width, height)
     if #nodes == 0 then return end
 
     local sx, sy = StartPoint(nodes, zone, width, height)
@@ -696,7 +747,10 @@ function Route.Compute(zone, ctx, yield)
     zone.travelTime = travel
     zone.actionTime = actions
     zone.approachTime = approach
-    zone.routeTime = travel + actions + (approach or 0)
+    local okAway, awayTime = pcall(AwayTime, away, zone, ctx, data)
+    zone.awayTime = okAway and awayTime > 0 and awayTime or nil
+    zone.awayQuests = away and away.quests > 0 and away.quests or nil
+    zone.routeTime = travel + actions + (approach or 0) + (zone.awayTime or 0)
     zone.routeStops = #order
     zone.routeSteps = RouteSteps(zone, nodes, order)
     zone.uiMapId = UiMapFor(zone.zoneId, data)

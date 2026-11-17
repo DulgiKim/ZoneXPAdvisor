@@ -334,6 +334,10 @@ local function ShowZoneTooltip(row)
         end
         GameTooltip:AddDoubleLine(L.TT_ROUTE_TRAVEL, FormatDuration(zone.travelTime), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
         GameTooltip:AddDoubleLine(L.TT_ROUTE_ACTIONS, FormatDuration(zone.actionTime), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
+        if zone.awayTime then
+            GameTooltip:AddDoubleLine(string.format(L.TT_ROUTE_AWAY, zone.awayQuests or 0), FormatDuration(zone.awayTime),
+                0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
+        end
         GameTooltip:AddDoubleLine(L.TT_RATE, FormatNumber(zone.xpPerHour) .. " XP", 0.3, 1, 0.3, 0.3, 1, 0.3)
         GameTooltip:AddLine(KillTimeText(), 0.6, 0.85, 1, true)
     end

@@ -5,10 +5,12 @@
 ### English
 - Mixed camps: kill and collect objectives within about 160 yards of each other are planned as one stop, also across quests, because you kill those mobs together. The route no longer splits one camp into separate steps with a turn-in squeezed in between. (Quests that unlock each other are kept apart, so the order stays valid.)
 - Next-steps panel shows a camp on one line, e.g. "Kill Mob A x6, Mob B x3", with the quests it serves. Objectives of finished quests drop out of the line, and long lines are cut off instead of overlapping.
+- Fix: quests picked up and turned in here whose mobs live in another zone (common in cities) were counted with no fighting time, so a city could top the XP-per-hour list with absurd rates. Those objectives now count their fighting time plus a round trip to that zone, shown in the zone tooltip.
 
 ### 한국어
 - 혼합 캠프: 약 160야드 안에 모여 있는 처치·수집 목표는 다른 퀘스트 것이라도 한 경유지로 계산합니다. 실제로 그 몬스터들은 한 번에 같이 잡기 때문입니다. 이제 한 캠프가 여러 단계로 나뉘거나 그 사이에 보고가 끼어들지 않습니다. (서로 선행 관계인 퀘스트는 묶지 않아서 순서는 그대로 지켜집니다.)
 - 다음 할 일 패널은 캠프를 한 줄로 보여 줍니다. 예: "몬스터 A x6, 몬스터 B x3 처치", 아랫줄에는 해당 퀘스트. 끝난 퀘스트의 목표는 줄에서 빠지고, 긴 줄은 다음 줄과 겹치지 않게 잘립니다.
+- 수정: 이 지역에서 받고 보고하지만 잡을 몬스터는 다른 지역에 있는 퀘스트(도시에 많음)를 전투 시간 없이 계산해서, 도시가 터무니없는 시간당 경험치로 1위에 오르던 문제를 고쳤습니다. 이제 그 목표의 전투 시간과 그 지역까지 왕복 시간을 더하고, 지역 툴팁에 표시합니다.
 
 ## 1.0.1
 
