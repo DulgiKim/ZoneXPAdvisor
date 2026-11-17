@@ -64,7 +64,21 @@ local function Complete(questId)
     return log and log.IsComplete and Call(log.IsComplete, questId) and true or false
 end
 
+local function ObjectiveDone(questId)
+    return TurnedIn(questId) or (InLog(questId) and Complete(questId))
+end
+
+--- Camp members whose quest still needs this objective.
+local function OpenMembers(step)
+    local open = {}
+    for _, m in ipairs(step.members or {}) do
+        if not ObjectiveDone(m.quest) then open[#open + 1] = m end
+    end
+    return open
+end
+
 local function StepDone(step)
+    if step.members then return #OpenMembers(step) == 0 end
     if TurnedIn(step.quest) then return true end
     if step.kind == "pickup" then return InLog(step.quest) end
     if step.kind == "objective" then return InLog(step.quest) and Complete(step.quest) end
@@ -78,11 +92,36 @@ local function TargetName(kind, id)
     return type(name) == "string" and name or ("#" .. tostring(id))
 end
 
+local CAMP_SHOWN = 3
+
+--- "Mob A x6, Mob B x3" for a camp, and the quest names it serves.
+local function CampText(step)
+    local open = OpenMembers(step)
+    local items, quests, seen, anyNpc = {}, {}, {}, false
+    for i, m in ipairs(open) do
+        if m.targetKind ~= "object" then anyNpc = true end
+        if i <= CAMP_SHOWN then
+            items[#items + 1] = string.format("%s x%d", TargetName(m.targetKind, m.targetId), math.max(1, math.ceil(m.count or 1)))
+        end
+        local q = m.name or ("#" .. tostring(m.quest))
+        if not seen[q] then
+            seen[q] = true
+            quests[#quests + 1] = q
+        end
+    end
+    local list = table.concat(items, ", ")
+    if #open > CAMP_SHOWN then list = list .. string.format(L.STEP_MORE, #open - CAMP_SHOWN) end
+    local main = string.format(anyNpc and L.STEP_KILL_LIST or L.STEP_COLLECT_LIST, list)
+    return main, table.concat(quests, " / "), anyNpc
+end
+
 --- Main and secondary text of a step.
 local function StepText(step)
     local quest = step.name or ("#" .. tostring(step.quest))
     local main
-    if step.kind == "pickup" then
+    if step.members then
+        main, quest = CampText(step)
+    elseif step.kind == "pickup" then
         main = string.format(L.STEP_PICKUP, quest)
     elseif step.kind == "turnin" then
         main = string.format(L.STEP_TURNIN, quest)
@@ -181,8 +220,12 @@ local function RenderPanel()
                 row.step, row.uiMapId, row.title = step, zone.uiMapId, main
                 row.main:SetText(main)
                 row.sub:SetText(sub)
-                local icon = STEP_ICON[step.kind] or STEP_ICON[step.targetKind or "npc"] or STEP_ICON.npc
-                if step.kind == "objective" then icon = STEP_ICON[step.targetKind] or STEP_ICON.npc end
+                local icon = STEP_ICON[step.kind]
+                if step.kind == "objective" then
+                    local kind = step.targetKind
+                    if step.members then kind = select(3, CampText(step)) and "npc" or "object" end
+                    icon = STEP_ICON[kind] or STEP_ICON.npc
+                end
                 row.icon:SetTexture(icon)
                 row:Show()
             end
@@ -277,6 +320,9 @@ local function CreatePanel()
         row.sub:SetPoint("TOPLEFT", row.main, "BOTTOMLEFT", 0, -2)
         row.sub:SetPoint("RIGHT", -4, 0)
         row.sub:SetJustifyH("LEFT")
+        -- Long camp lines are cut with "..." instead of spilling into the next row.
+        if row.main.SetWordWrap then row.main:SetWordWrap(false) end
+        if row.sub.SetWordWrap then row.sub:SetWordWrap(false) end
         row:SetScript("OnClick", function(self)
             local step = self.step
             if not step then return end

@@ -34,6 +34,9 @@ local Now = debugprofilestop
 local DEFAULT_ZONE_SIZE = { 3400, 2300 } -- average classic zone in yards, when the client can't say
 local CLUSTER_RADIUS = 8      -- percent of zone width; spawns closer than this form one camp
 local MAX_CLUSTER_SAMPLE = 80
+-- Kill / collect objectives whose spots are this close (yards) form one camp: in a mixed camp
+-- you kill every kind of mob together, so the route visits it once.
+local CAMP_RADIUS = 160
 -- Getting to a zone that isn't the current one.
 local FLIGHT_SPEED = 32       -- yards/second on a flight path
 local FLIGHT_OVERHEAD = 120   -- seconds: reaching the flight master, landing, walking to the hub
@@ -163,6 +166,111 @@ end
 -- Node construction
 ---------------------------------------------------------------------------------------------
 
+local function Dist(a, b)
+    local dx, dy = a.x - b.x, a.y - b.y
+    return sqrt(dx * dx + dy * dy)
+end
+
+--- True when the precedence edges contain a cycle (Kahn's algorithm leaves nodes behind).
+local function HasCycle(nodes)
+    local indegree, children = {}, {}
+    for i, node in ipairs(nodes) do
+        indegree[i] = indegree[i] or 0
+        for _, p in ipairs(node.preds) do
+            indegree[i] = indegree[i] + 1
+            children[p] = children[p] or {}
+            table.insert(children[p], i)
+        end
+    end
+    local queue, done = {}, 0
+    for i = 1, #nodes do if indegree[i] == 0 then queue[#queue + 1] = i end end
+    local head = 1
+    while queue[head] do
+        local i = queue[head]
+        head = head + 1
+        done = done + 1
+        for _, c in ipairs(children[i] or {}) do
+            indegree[c] = indegree[c] - 1
+            if indegree[c] == 0 then queue[#queue + 1] = c end
+        end
+    end
+    return done < #nodes
+end
+
+--- Merges objective nodes that lie within CAMP_RADIUS of each other into one camp node:
+--- position weighted by time spent, time summed, prerequisites combined, and `members`
+--- listing each quest objective inside. With `sameQuestOnly`, only objectives of one quest
+--- are merged (always safe: they share the same pickup).
+local function MergeCamps(nodes, sameQuestOnly)
+    local objectives = {}
+    for i, node in ipairs(nodes) do
+        if node.kind == "objective" then objectives[#objectives + 1] = i end
+    end
+    if #objectives < 2 then return nodes end
+    table.sort(objectives, function(a, b) return nodes[a].duration > nodes[b].duration end)
+
+    local campOf, camps = {}, {}
+    for _, seed in ipairs(objectives) do
+        if not campOf[seed] then
+            local s = nodes[seed]
+            local camp = { seed }
+            local w = math.max(s.duration, 1)
+            local cx, cy, cpx, cpy, total = s.x * w, s.y * w, s.px * w, s.py * w, w
+            campOf[seed] = camp
+            for _, other in ipairs(objectives) do
+                local o = nodes[other]
+                if not campOf[other] and (not sameQuestOnly or o.quest == s.quest)
+                    and Dist(o, { x = cx / total, y = cy / total }) <= CAMP_RADIUS then
+                    camp[#camp + 1] = other
+                    campOf[other] = camp
+                    local ow = math.max(o.duration, 1)
+                    cx, cy = cx + o.x * ow, cy + o.y * ow
+                    cpx, cpy, total = cpx + o.px * ow, cpy + o.py * ow, total + ow
+                end
+            end
+            camp.x, camp.y, camp.px, camp.py = cx / total, cy / total, cpx / total, cpy / total
+            camps[#camps + 1] = camp
+        end
+    end
+
+    -- New node list: every node that is not in a multi-objective camp, plus one node per camp.
+    local merged, newIndex, sourcesOf = {}, {}, {}
+    for i, node in ipairs(nodes) do
+        local camp = campOf[i]
+        if not camp or #camp == 1 then
+            merged[#merged + 1] = { x = node.x, y = node.y, px = node.px, py = node.py, duration = node.duration,
+                quest = node.quest, kind = node.kind, target = node.target }
+            newIndex[i] = #merged
+            sourcesOf[#merged] = { i }
+        elseif camp[1] == i then
+            local members, duration = {}, 0
+            for _, m in ipairs(camp) do
+                members[#members + 1] = { quest = nodes[m].quest, target = nodes[m].target }
+                duration = duration + nodes[m].duration
+            end
+            merged[#merged + 1] = { x = camp.x, y = camp.y, px = camp.px, py = camp.py, duration = duration,
+                quest = node.quest, kind = "objective", members = members }
+            for _, m in ipairs(camp) do newIndex[m] = #merged end
+            sourcesOf[#merged] = camp
+        end
+    end
+    -- Remap prerequisites (a camp gets the union of its members'), without duplicates or self-links.
+    for index, node in ipairs(merged) do
+        local preds, seen = {}, {}
+        for _, old in ipairs(sourcesOf[index]) do
+            for _, p in ipairs(nodes[old].preds) do
+                local np = newIndex[p]
+                if np and np ~= index and not seen[np] then
+                    seen[np] = true
+                    preds[#preds + 1] = np
+                end
+            end
+        end
+        node.preds = preds
+    end
+    return merged
+end
+
 --- Builds route nodes for every quest of a zone. Each node: x, y (yards), duration (s),
 --- preds (indices that must be visited first).
 local function BuildNodes(zone, ctx, data, width, height)
@@ -250,17 +358,17 @@ local function BuildNodes(zone, ctx, data, width, height)
 
     -- Objectives inherit the pickup's chain predecessors transitively through the pickup,
     -- so no further edges are needed.
-    return nodes
+
+    -- Mixed camps: merge nearby objectives. Merging objectives of different quests can create
+    -- a cycle when one quest unlocks the other; then only same-quest objectives are merged.
+    local merged = MergeCamps(nodes, false)
+    if HasCycle(merged) and not HasCycle(nodes) then merged = MergeCamps(nodes, true) end
+    return merged
 end
 
 ---------------------------------------------------------------------------------------------
 -- Route solver
 ---------------------------------------------------------------------------------------------
-
-local function Dist(a, b)
-    local dx, dy = a.x - b.x, a.y - b.y
-    return sqrt(dx * dx + dy * dy)
-end
 
 --- Nearest-neighbour tour that only visits nodes whose predecessors are done.
 --- Nodes stuck behind an unreachable predecessor (e.g. a cycle) are appended at the end.
@@ -498,12 +606,24 @@ local function RouteSteps(zone, nodes, order)
         local node = nodes[index]
         if node.kind then
             local target = node.target
-            steps[#steps + 1] = {
+            local step = {
                 kind = node.kind, quest = node.quest, name = names[node.quest],
                 x = node.px, y = node.py,
                 targetKind = target and target.kind, targetId = target and target.id,
                 count = target and target.count,
             }
+            if node.members then
+                -- A camp: every objective killed or collected there, possibly of several quests.
+                step.members = {}
+                for _, m in ipairs(node.members) do
+                    step.members[#step.members + 1] = {
+                        quest = m.quest, name = names[m.quest],
+                        targetKind = m.target and m.target.kind, targetId = m.target and m.target.id,
+                        count = m.target and m.target.count,
+                    }
+                end
+            end
+            steps[#steps + 1] = step
             if #steps >= MAX_STEPS then break end
         end
     end
@@ -587,3 +707,5 @@ end
 Route._NearestNeighbour = NearestNeighbour
 Route._TwoOpt = TwoOpt
 Route._OrOpt = OrOpt
+Route._MergeCamps = MergeCamps
+Route._HasCycle = HasCycle
