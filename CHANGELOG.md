@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0 (Beta)
+
+### English
+- Level-ups along the route: XP is now added up in the order the route earns it, and you level up on the way, so later quest rewards and kills give less (nothing once grey). The rested pool is spent as kills happen. Zones that take you up several levels no longer overstate their XP.
+- Rows show the level you reach (e.g. "reaches Lv 25.3") instead of "x times the next level"; the tooltip shows the level after the zone's quests.
+- Getting there: route time now includes travelling from where you stand to the zone (the faster of running and a flight path on the same continent, about 15 minutes for a boat or zeppelin trip). XP per hour counts it too.
+- Assumes known flight paths; the hearthstone is not modelled.
+- Language option in Settings → General: game language, English or 한국어 (applies after a UI reload). Quest and zone names still come from the game client.
+
+### 한국어
+- 동선 중 레벨업: 동선에서 퀘스트를 끝내는 순서대로 경험치를 쌓으며 레벨을 올려 계산합니다. 레벨이 오르면 뒤쪽 퀘스트 보상과 처치 경험치가 줄고, 회색이 되면 0이 됩니다. 휴식 경험치도 처치 순서대로 소모합니다. 몇 레벨씩 오르는 지역의 경험치가 부풀려지지 않습니다.
+- 목록에 "다음 레벨의 N배" 대신 도착 레벨(예: "Lv 25.3 도달")을 보여주고, 툴팁에 퀘스트를 끝낸 뒤 레벨을 표시합니다.
+- 지역까지 이동: 지금 위치에서 그 지역까지 가는 시간을 동선 시간에 더합니다. 같은 대륙은 뛰어가기와 비행 경로 중 빠른 쪽, 다른 대륙은 배/비행선으로 약 15분입니다. 시간당 경험치에도 반영됩니다.
+- 비행 경로는 이미 알고 있다고 가정하며, 귀환석은 계산하지 않습니다.
+- 설정 → 일반에 언어 선택 추가: 게임 언어 / English / 한국어 (UI를 다시 불러오면 적용). 퀘스트와 지역 이름은 게임 클라이언트 언어 그대로 나옵니다.
+
 ## 0.5.0 (Beta)
 
 ### English

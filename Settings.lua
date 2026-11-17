@@ -19,7 +19,22 @@ local WIDTH, HEIGHT = 500, 500
 local TAB_KEYS = { "general", "killtime", "accuracy", "about" }
 
 local frame, tabs, pages, killStatus, killStats, soloCheck, modeButtons, minimapCheck
-local eliteCheck, restedStatus, calibrationStatus
+local eliteCheck, restedStatus, calibrationStatus, languageButtons
+
+local RELOAD_POPUP = "ZONEXPADVISOR_RELOAD_LANGUAGE"
+if StaticPopupDialogs then
+    StaticPopupDialogs[RELOAD_POPUP] = {
+        -- Both languages: the player is switching between them.
+        text = "The new language is used after reloading the UI. Reload now?\n\n언어를 바꾸려면 UI를 다시 불러와야 합니다. 지금 다시 불러올까요?",
+        button1 = RELOADUI or "Reload",
+        button2 = LATER or CANCEL or "Later",
+        OnAccept = function() if ReloadUI then ReloadUI() end end,
+        timeout = 0,
+        whileDead = 1,
+        hideOnEscape = 1,
+        preferredIndex = 3,
+    }
+end
 
 local function Metadata(key)
     local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
@@ -152,7 +167,33 @@ local function BuildGeneral(page)
     Paragraph(page, L.SET_COMMANDS, help)
 
     local mouse = SectionTitle(page, L.SET_MOUSE_TITLE, help, -96)
-    Paragraph(page, L.SET_MOUSE, mouse)
+    local mouseText = Paragraph(page, L.SET_MOUSE, mouse)
+
+    -- Language: Auto / English / 한국어. Takes effect after a UI reload.
+    local langTitle = SectionTitle(page, L.SET_LANG_TITLE, mouseText, -40)
+    languageButtons = {}
+    local previous
+    for _, key in ipairs(ns.LANGUAGES) do
+        local text = key == "auto"
+            and string.format(L.SET_LANG_AUTO, ns.LANGUAGE_NAMES[ns.ResolveLanguage("auto")])
+            or ns.LANGUAGE_NAMES[key]
+        local rb = RadioButton(page, text, function()
+            local db = ns.UI.GetDB()
+            local before = ns.ResolveLanguage(db.language)
+            db.language = key
+            for k, b in pairs(languageButtons) do b:SetChecked(k == key) end
+            if ns.ResolveLanguage(key) ~= before and StaticPopup_Show then
+                StaticPopup_Show(RELOAD_POPUP)
+            end
+        end)
+        if previous then
+            rb:SetPoint("LEFT", previous.label, "RIGHT", 18, 0)
+        else
+            rb:SetPoint("TOPLEFT", langTitle, "BOTTOMLEFT", 2, -10)
+        end
+        languageButtons[key] = rb
+        previous = rb
+    end
 end
 
 local function RefreshKillTime()
@@ -325,6 +366,8 @@ local function SelectTab(key)
     if key == "general" and minimapCheck then
         local db = ns.UI.GetDB()
         minimapCheck:SetChecked(not (db.minimap and db.minimap.hide))
+        local choice = db.language or "auto"
+        for k, b in pairs(languageButtons or {}) do b:SetChecked(k == choice) end
     end
 end
 

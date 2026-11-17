@@ -104,6 +104,13 @@ L.MM_SHOWN = "Minimap button shown."
 L.KT_MEASURED = "Kill time: measured %.1f s per kill (last %d kills)"
 L.KT_ESTIMATE = "Kill time: estimated %.1f s per kill (%d/%d kills measured so far)"
 L.KT_RESET = "Kill-time measurements cleared for this character."
+L.SET_LANG_TITLE = "Language"
+L.SET_LANG_AUTO = "Game language (%s)"
+L.XP_REACH = "~%s XP  |  reaches Lv %.1f"
+L.TT_END_LEVEL = "Level after these quests"
+L.TT_END_LEVEL_NOTE = "Quest and kill XP shrink as you level up along the route; that is already counted."
+L.TT_ROUTE_APPROACH = "  Getting there"
+L.TT_UNKNOWN = "unknown"
 L.TT_ELITE_TAG = "[Elite]"
 L.TT_RESTED = "Rested bonus on kills"
 L.TT_ELITE_SKIPPED = "%d elite / group quests not counted (%s XP). They are counted in a group, or when enabled in settings."
@@ -127,7 +134,13 @@ L.IN_COMBAT = "Scan postponed until combat ends."
 L.LOADED = "loaded. Type /zxp to open."
 L.COMBAT_LOCKED = "Can't open during combat."
 
-if GetLocale() == "koKR" then
+-- Snapshot of the English strings; the Korean table below only overrides.
+local EN = {}
+for k, v in pairs(L) do EN[k] = v end
+
+local KO = {}
+do
+    local L = KO
     L.TITLE = "ZoneXP Advisor"
     L.SECTION_TITLE = "지금 레벨업하기 좋은 지역"
     L.REFRESH = "새로고침"
@@ -225,6 +238,13 @@ if GetLocale() == "koKR" then
     L.KT_MEASURED = "전투 시간: 실측 한 마리당 %.1f초 (최근 %d마리 기준)"
     L.KT_ESTIMATE = "전투 시간: 추정 한 마리당 %.1f초 (실측 %d/%d마리 진행 중)"
     L.KT_RESET = "이 캐릭터의 전투 시간 측정 기록을 지웠습니다."
+    L.SET_LANG_TITLE = "언어"
+    L.SET_LANG_AUTO = "게임 언어 (%s)"
+    L.XP_REACH = "약 %s XP  |  Lv %.1f 도달"
+    L.TT_END_LEVEL = "이 퀘스트를 끝낸 뒤 레벨"
+    L.TT_END_LEVEL_NOTE = "동선 중간에 레벨이 오르면 퀘스트와 처치 경험치가 줄어드는 것까지 계산했습니다."
+    L.TT_ROUTE_APPROACH = "  지역까지 이동"
+    L.TT_UNKNOWN = "알 수 없음"
     L.TT_ELITE_TAG = "[정예]"
     L.TT_RESTED = "휴식 경험치 보너스 (처치)"
     L.TT_ELITE_SKIPPED = "정예/파티 퀘스트 %d개는 계산에서 뺐습니다 (%s XP). 파티 중이거나 설정에서 켜면 포함합니다."
@@ -248,3 +268,40 @@ if GetLocale() == "koKR" then
     L.LOADED = "로드됨. /zxp 를 입력하면 창이 열립니다."
     L.COMBAT_LOCKED = "전투 중에는 열 수 없습니다."
 end
+
+-- Language selection ------------------------------------------------------------------------
+-- The chosen language is stored in ZoneXPAdvisorDB.language: "auto" (game client language),
+-- "enUS" or "koKR". Strings are swapped inside the same table, so every file's `local L`
+-- sees them. Saved variables arrive after the files run, so the choice is applied on
+-- ADDON_LOADED, before any window is built.
+
+ns.LANGUAGES = { "auto", "enUS", "koKR" }
+ns.LANGUAGE_NAMES = { enUS = "English", koKR = "한국어" }
+
+--- Resolves "auto" to the client language (Korean clients get Korean, everyone else English).
+function ns.ResolveLanguage(choice)
+    if choice == "enUS" or choice == "koKR" then return choice end
+    return GetLocale() == "koKR" and "koKR" or "enUS"
+end
+
+function ns.ApplyLanguage(choice)
+    local lang = ns.ResolveLanguage(choice)
+    for k in pairs(L) do L[k] = nil end
+    for k, v in pairs(EN) do L[k] = v end
+    if lang == "koKR" then
+        for k, v in pairs(KO) do L[k] = v end
+    end
+    ns.activeLanguage = lang
+    return lang
+end
+
+ns.ApplyLanguage("auto")
+
+local loader = CreateFrame("Frame")
+loader:RegisterEvent("ADDON_LOADED")
+loader:SetScript("OnEvent", function(self, _, name)
+    if name ~= ADDON_NAME then return end
+    self:UnregisterEvent("ADDON_LOADED")
+    local db = ZoneXPAdvisorDB
+    ns.ApplyLanguage(db and db.language or "auto")
+end)

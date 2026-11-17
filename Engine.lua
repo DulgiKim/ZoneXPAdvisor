@@ -325,6 +325,14 @@ local function NpcKillXP(npcId, playerLevel)
     return xp
 end
 
+--- Kill XP of one NPC at an arbitrary player level (uncached; for the level-up simulation).
+local function NpcKillXPAt(npcId, playerLevel)
+    local lo = NpcDB.minLevel(npcId) or 0
+    local hi = NpcDB.maxLevel(npcId) or lo
+    local rank = NpcDB.rank(npcId) or 0
+    return (KillXP(lo, rank, playerLevel) + KillXP(hi, rank, playerLevel)) / 2 * killFactor
+end
+
 local function NpcIsElite(npcId)
     return IsEliteRank(NpcDB.rank(npcId) or 0)
 end
@@ -590,7 +598,7 @@ local function AddToZone(zones, zoneId, questId, name, questLevel, xp, status, m
     end
     zone.quests[#zone.quests + 1] = {
         id = questId, name = name, level = questLevel, status = status,
-        xp = xp, mobXP = mobXP, kills = kills, total = xp + mobXP, targets = targets, elite = elite,
+        xp = xp, baseXP = xp, mobXP = mobXP, kills = kills, total = xp + mobXP, targets = targets, elite = elite,
     }
 end
 
@@ -625,6 +633,9 @@ local function NewContext(factionMode)
         statusCache = {},
         countElite = Engine.CountEliteQuests(),
         rested = Engine.RestedPool(),
+        xpCurrent = UnitXP("player") or 0,
+        xpMax = UnitXPMax("player") or 0,
+        maxLevel = (GetMaxPlayerLevel and GetMaxPlayerLevel()) or 60,
     }
 end
 
@@ -863,14 +874,116 @@ local function RateHunting(list, hunt)
     end
 end
 
---- `rested` is the player's rested pool: kill XP is doubled until it runs out, so each zone
---- gains up to that much extra XP from the kills its quests require.
-local function FinishZones(zones, hunt, rested)
+---------------------------------------------------------------------------------------------
+-- Level-up simulation
+---------------------------------------------------------------------------------------------
+
+-- Classic XP needed to finish each level. Scaled by the client's real value for the current
+-- level, so a server with different numbers is followed automatically.
+local XP_TO_LEVEL = {
+    400, 900, 1400, 2100, 2800, 3600, 4500, 5400, 6500, 7600,
+    8800, 10100, 11400, 12900, 14400, 16000, 17700, 19400, 21300, 23200,
+    25200, 27300, 29400, 31700, 34000, 36400, 38900, 41400, 44300, 47400,
+    50800, 54500, 58600, 62800, 67100, 71600, 76100, 80800, 85700, 90700,
+    95800, 101000, 106300, 111800, 117500, 123200, 129100, 135100, 141200, 147500,
+    153900, 160400, 167100, 173900, 180800, 187900, 195000, 202300, 209800,
+}
+
+local function XPToNext(ctx, level)
+    if level >= ctx.maxLevel then return nil end
+    if level == ctx.playerLevel and ctx.xpMax > 0 then return ctx.xpMax end
+    local base = XP_TO_LEVEL[level]
+    if not base then return nil end
+    local current = XP_TO_LEVEL[ctx.playerLevel]
+    local scale = (current and ctx.xpMax > 0) and ctx.xpMax / current or 1
+    return floor(base * scale + 0.5)
+end
+
+--- Quest reward at a given player level; quests without DB data keep their client value.
+local function QuestXPAt(quest, level)
+    local entry = questXP and questXP[quest.id]
+    if entry and entry[1] and entry[2] and entry[1] > 0 and entry[2] > 0 then
+        return floor(ScaleXP(entry[2], entry[1], level) * questFactor + 0.5)
+    end
+    return quest.baseXP or quest.xp
+end
+
+local function MobXPAt(quest, level)
+    if type(quest.targets) ~= "table" or not NpcDB then return quest.mobXP or 0 end
+    local xp = 0
+    for _, t in ipairs(quest.targets) do
+        if t.kind == "npc" then xp = xp + t.count * NpcKillXPAt(t.id, level) end
+    end
+    return xp
+end
+
+local STATUS_RANK = { ready = 1, active = 2, avail = 3, chain = 4, soon = 5 }
+
+--- Default questing order: turn-ins first, then quests in the log, then new ones, low level first.
+local function DefaultOrder(zone)
+    local list = {}
+    for i, q in ipairs(zone.quests) do list[i] = q end
+    table.sort(list, function(a, b)
+        local ra, rb = STATUS_RANK[a.status] or 9, STATUS_RANK[b.status] or 9
+        if ra ~= rb then return ra < rb end
+        local la, lb = a.level or 0, b.level or 0
+        if la ~= lb then return la < lb end
+        return a.id < b.id
+    end)
+    return list
+end
+
+--- Re-evaluates a zone's XP quest by quest in `ordered` order, levelling the player up as XP
+--- comes in: later quests and kills give less (or nothing once grey), and the rested pool is
+--- spent as kills happen. Sets questXP, mobXP, restedXP, score, endLevel and endProgress.
+function Engine.SimulateZone(zone, ctx, ordered)
+    if not (ctx and ctx.xpMax and QuestDB) then return end
+    ordered = ordered or DefaultOrder(zone)
+    local level, xp = ctx.playerLevel, ctx.xpCurrent
+    local need = XPToNext(ctx, level)
+    local pool = ctx.rested or 0
+    local questSum, mobSum, restedSum, kills = 0, 0, 0, 0
+
+    local function Gain(amount)
+        xp = xp + amount
+        while need and xp >= need do
+            xp = xp - need
+            level = level + 1
+            need = XPToNext(ctx, level)
+        end
+        if not need then xp = 0 end -- max level: no more XP
+    end
+
+    for _, quest in ipairs(ordered) do
+        local weight = WEIGHT[quest.status] or 1
+        local mob = quest.status ~= "ready" and MobXPAt(quest, level) or 0
+        local weightedMob = mob * weight
+        local bonus = min(pool, weightedMob)
+        pool = pool - bonus
+        Gain(weightedMob + bonus)
+
+        local reward = QuestXPAt(quest, level)
+        Gain(reward * weight)
+
+        quest.xp, quest.mobXP = reward, floor(mob)
+        quest.total = reward + quest.mobXP
+        questSum = questSum + reward * weight
+        mobSum = mobSum + weightedMob
+        restedSum = restedSum + bonus
+        kills = kills + (quest.kills or 0)
+    end
+
+    zone.questXP, zone.mobXP, zone.restedXP = questSum, mobSum, floor(restedSum)
+    zone.score = questSum + mobSum + zone.restedXP
+    zone.endLevel = level
+    zone.endProgress = need and need > 0 and xp / need or 0
+end
+
+local function FinishZones(zones, hunt, ctx)
     local list = {}
     for _, zone in pairs(zones) do
         if zone.score > 0 then
-            zone.restedXP = floor(min(rested or 0, zone.mobXP))
-            zone.score = zone.questXP + zone.mobXP + zone.restedXP
+            if ctx then Engine.SimulateZone(zone, ctx) end
             table.sort(zone.quests, function(a, b) return a.total > b.total end)
             if type(zone.zoneId) == "number" then
                 zone.name = (C_Map and C_Map.GetAreaInfo and C_Map.GetAreaInfo(zone.zoneId)) or ("Zone " .. zone.zoneId)
@@ -954,7 +1067,7 @@ function Engine.StartScan(factionMode, onProgress, onDone)
 
         -- Routes for the best zones, one zone per frame. Route.Compute runs inside pcall,
         -- so it must not yield (WoW's Lua cannot yield across pcall).
-        local list = FinishZones(zones, hunt, ctx.rested)
+        local list = FinishZones(zones, hunt, ctx)
         local routeCount = min(ROUTE_ZONES, #list)
         for i = 1, routeCount do
             local zone = list[i]
@@ -965,6 +1078,7 @@ function Engine.StartScan(factionMode, onProgress, onDone)
             end
             coroutine.yield(HUNT_END + (1 - HUNT_END) * i / max(routeCount, 1))
         end
+        table.sort(list, function(a, b) return a.score > b.score end)
         finalList = list
     end)
 
@@ -975,13 +1089,13 @@ function Engine.StartScan(factionMode, onProgress, onDone)
             Engine.lastError = progress
             activeScan = nil
             self:SetScript("OnUpdate", nil)
-            onDone(FinishZones(zones, hunt, ctx.rested), ctx)
+            onDone(FinishZones(zones, hunt, ctx), ctx)
             return
         end
         if coroutine.status(activeScan) == "dead" then
             activeScan = nil
             self:SetScript("OnUpdate", nil)
-            onDone(finalList or FinishZones(zones, hunt, ctx.rested), ctx)
+            onDone(finalList or FinishZones(zones, hunt, ctx), ctx)
         elseif progress and onProgress then
             onProgress(progress)
         end

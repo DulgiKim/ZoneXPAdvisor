@@ -26,6 +26,11 @@ local MAX_TWO_OPT_PASSES = 3
 local DEFAULT_ZONE_SIZE = { 3400, 2300 } -- average classic zone in yards, when the client can't say
 local CLUSTER_RADIUS = 8      -- percent of zone width; spawns closer than this form one camp
 local MAX_CLUSTER_SAMPLE = 80
+-- Getting to a zone that isn't the current one.
+local FLIGHT_SPEED = 32       -- yards/second on a flight path
+local FLIGHT_OVERHEAD = 120   -- seconds: reaching the flight master, landing, walking to the hub
+local FLIGHT_PATH_FACTOR = 1.4 -- flight routes are not straight lines
+local OTHER_CONTINENT = 15 * 60 -- boat or zeppelin: waiting, sailing and travelling on
 
 --- Seconds per kill of one NPC including downtime. Uses this character's measured pace
 --- (KillTimer.lua) once enough kills are recorded, adjusted for the mob's level and rank.
@@ -328,6 +333,66 @@ local function TwoOpt(nodes, order, start, yield)
 end
 
 ---------------------------------------------------------------------------------------------
+-- Getting there
+---------------------------------------------------------------------------------------------
+
+local function UiMapFor(areaId, data)
+    if data.zoneModule and data.zoneModule.GetUiMapIdByAreaId then
+        local ok, id = pcall(data.zoneModule.GetUiMapIdByAreaId, data.zoneModule, areaId)
+        if ok and type(id) == "number" and id > 0 then return id end
+    end
+end
+
+--- Continent and world position (yards) of a point on a UI map.
+local function WorldPos(uiMapId, fx, fy)
+    if not (uiMapId and C_Map and C_Map.GetWorldPosFromMapPos and CreateVector2D) then return nil end
+    local ok, continent, pos = pcall(C_Map.GetWorldPosFromMapPos, uiMapId, CreateVector2D(fx, fy))
+    if ok and type(continent) == "number" and pos and type(pos.x) == "number" and type(pos.y) == "number" then
+        return continent, pos.x, pos.y
+    end
+end
+
+--- Seconds to get from the player's position to the zone's starting point: the faster of
+--- running there and taking a flight path, or a fixed boat trip for another continent.
+--- Returns nil when either position is unknown (e.g. inside an instance).
+local function ApproachTime(zone, ctx, data, hx, hy, width, height)
+    if zone.isCurrent then return 0 end
+    if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return nil end
+    local zc, zx, zy = WorldPos(UiMapFor(zone.zoneId, data), hx / width, hy / height)
+    if not zc then return nil end
+    local playerMap = C_Map.GetBestMapForUnit("player")
+    local pos = playerMap and C_Map.GetPlayerMapPosition(playerMap, "player")
+    if not (pos and type(pos.x) == "number") then return nil end
+    local pc, px, py = WorldPos(playerMap, pos.x, pos.y)
+    if not pc then return nil end
+    if pc ~= zc then return OTHER_CONTINENT end
+    local d = sqrt((zx - px) ^ 2 + (zy - py) ^ 2)
+    local speed = ctx.playerLevel >= MOUNT_LEVEL and MOUNT_SPEED or RUN_SPEED
+    local ground = d * PATH_FACTOR / speed
+    local flight = FLIGHT_OVERHEAD + d * FLIGHT_PATH_FACTOR / FLIGHT_SPEED
+    return min(ground, flight)
+end
+
+--- Quests in the order the route finishes them (last node of each quest), so the level-up
+--- simulation hands out XP in the order it is earned. Quests without nodes go last.
+local function QuestsInRouteOrder(zone, nodes, order)
+    local finish = {}
+    for position, index in ipairs(order) do
+        local id = nodes[index].quest
+        if id then finish[id] = position end
+    end
+    local list = {}
+    for i, q in ipairs(zone.quests) do list[i] = q end
+    local fallback = #order + 1
+    table.sort(list, function(a, b)
+        local pa, pb = finish[a.id] or fallback, finish[b.id] or fallback
+        if pa ~= pb then return pa < pb end
+        return a.id < b.id
+    end)
+    return list
+end
+
+---------------------------------------------------------------------------------------------
 -- Public
 ---------------------------------------------------------------------------------------------
 
@@ -380,10 +445,17 @@ function Route.Compute(zone, ctx, yield)
 
     local speed = ctx.playerLevel >= MOUNT_LEVEL and MOUNT_SPEED or RUN_SPEED
     local travel = distance * PATH_FACTOR / speed
+    local okApproach, approach = pcall(ApproachTime, zone, ctx, data, sx, sy, width, height)
+    approach = okApproach and approach or nil
+
+    -- XP in the order the route earns it, levelling up on the way.
+    if ns.Engine.SimulateZone then ns.Engine.SimulateZone(zone, ctx, QuestsInRouteOrder(zone, nodes, order)) end
+
     zone.routeDistance = distance
     zone.travelTime = travel
     zone.actionTime = actions
-    zone.routeTime = travel + actions
+    zone.approachTime = approach
+    zone.routeTime = travel + actions + (approach or 0)
     zone.routeStops = #order
     zone.xpPerHour = zone.routeTime > 0 and zone.score / (zone.routeTime / 3600) or 0
 end

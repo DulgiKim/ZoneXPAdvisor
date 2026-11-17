@@ -168,12 +168,13 @@ end
 ---------------------------------------------------------------------------------------------
 
 local STATUS_ORDER = { "ready", "active", "avail", "chain", "soon" }
+-- Locale keys, looked up when shown (the language can change after load).
 local STATUS_LABEL = {
-    ready = L.TT_READY,
-    active = L.TT_ACTIVE,
-    avail = L.TT_AVAIL,
-    chain = L.TT_CHAIN,
-    soon = L.TT_SOON,
+    ready = "TT_READY",
+    active = "TT_ACTIVE",
+    avail = "TT_AVAIL",
+    chain = "TT_CHAIN",
+    soon = "TT_SOON",
 }
 local STATUS_COLOR = {
     ready = { 0.3, 1, 0.3 },
@@ -229,7 +230,7 @@ local function ShowZoneTooltip(row)
             if quest.status == status and shown < TOOLTIP_QUESTS then
                 if not header then
                     GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine(STATUS_LABEL[status], unpack(STATUS_COLOR[status]))
+                    GameTooltip:AddLine(L[STATUS_LABEL[status]], unpack(STATUS_COLOR[status]))
                     header = true
                 end
                 local lc = LevelColor(quest.level)
@@ -258,6 +259,11 @@ local function ShowZoneTooltip(row)
         GameTooltip:AddDoubleLine(L.TT_RESTED, "+" .. FormatNumber(zone.restedXP) .. " XP", 0.4, 0.6, 1, 0.4, 0.6, 1)
     end
     GameTooltip:AddDoubleLine(L.TT_TOTAL_LABEL, FormatNumber(zone.score) .. " XP", 0.3, 1, 0.3, 0.3, 1, 0.3)
+    if zone.endLevel and zone.endLevel > UnitLevel("player") then
+        GameTooltip:AddDoubleLine(L.TT_END_LEVEL, string.format("%.1f", zone.endLevel + (zone.endProgress or 0)),
+            0.8, 0.8, 0.8, 1, 1, 1)
+        GameTooltip:AddLine(L.TT_END_LEVEL_NOTE, 0.6, 0.6, 0.6, true)
+    end
     if (zone.eliteSkipped or 0) > 0 then
         GameTooltip:AddLine(string.format(L.TT_ELITE_SKIPPED, zone.eliteSkipped, FormatNumber(zone.eliteSkippedXP or 0)),
             0.6, 0.6, 0.6, true)
@@ -268,6 +274,11 @@ local function ShowZoneTooltip(row)
         GameTooltip:AddLine(L.TT_ROUTE, C.gold[1], C.gold[2], C.gold[3])
         GameTooltip:AddDoubleLine(string.format(L.TT_ROUTE_STOPS, zone.routeStops, FormatNumber(zone.routeDistance)),
             FormatDuration(zone.routeTime), 1, 1, 1, 1, 1, 1)
+        if zone.approachTime and zone.approachTime > 0 then
+            GameTooltip:AddDoubleLine(L.TT_ROUTE_APPROACH, FormatDuration(zone.approachTime), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
+        elseif not zone.approachTime and not zone.isCurrent then
+            GameTooltip:AddDoubleLine(L.TT_ROUTE_APPROACH, L.TT_UNKNOWN, 0.8, 0.8, 0.8, 0.6, 0.6, 0.6)
+        end
         GameTooltip:AddDoubleLine(L.TT_ROUTE_TRAVEL, FormatDuration(zone.travelTime), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
         GameTooltip:AddDoubleLine(L.TT_ROUTE_ACTIONS, FormatDuration(zone.actionTime), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
         GameTooltip:AddDoubleLine(L.TT_RATE, FormatNumber(zone.xpPerHour) .. " XP", 0.3, 1, 0.3, 0.3, 1, 0.3)
@@ -380,7 +391,10 @@ local function RenderRow(row, rank, zone, remaining, currentZone)
     row.bar:SetValue(math.min(fraction, 1))
     local barColor = fraction >= 1 and C.zoneBarFull or C.zoneBar
     row.bar:SetStatusBarColor(barColor[1], barColor[2], barColor[3])
-    if fraction >= 1 then
+    if fraction >= 1 and zone.endLevel then
+        -- Simulated level after the zone's quests (XP shrinks as you level, so not score / remaining).
+        row.xp:SetText(string.format(L.XP_REACH, FormatNumber(zone.score), zone.endLevel + (zone.endProgress or 0)))
+    elseif fraction >= 1 then
         row.xp:SetText(string.format(L.XP_LEVELS, FormatNumber(zone.score), fraction))
     else
         row.xp:SetText(string.format(L.XP_PERCENT, FormatNumber(zone.score), math.floor(fraction * 100 + 0.5)))
