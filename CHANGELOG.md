@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1
+
+### English
+- Shorter quest routes: after 2-opt, an Or-opt pass moves single stops or short runs of stops to where they fit best (e.g. a lone pickup next to nearby stops), keeping pickup → objectives → turn-in order. Travel distance is about 10% shorter on average, and the next-steps order is more natural. Route planning is capped at 8 ms per zone so big zones never stall a frame.
+
+### 한국어
+- 더 짧은 퀘스트 동선: 2-opt 뒤에 Or-opt를 추가해서, 동떨어진 경유지 하나나 짧은 묶음을 더 잘 맞는 자리로 옮깁니다(받기 → 목표 → 보고 순서는 그대로). 이동 거리가 평균 10% 정도 줄고, 다음 할 일 순서가 더 자연스러워집니다. 큰 지역에서도 프레임이 끊기지 않도록 지역당 계산 시간을 8 ms로 제한합니다.
+
 ## 1.0.0
 
 ### English

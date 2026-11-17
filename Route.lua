@@ -4,8 +4,8 @@
 --
 -- The route is a precedence-constrained travelling-salesman tour (pickup before objectives
 -- before turn-in; a chained quest's pickup after its prerequisite's turn-in). It is built
--- with a nearest-neighbour pass and then shortened with 2-opt moves that keep every
--- precedence rule intact.
+-- with a nearest-neighbour pass and then shortened with 2-opt and Or-opt moves that keep
+-- every precedence rule intact.
 
 local ADDON_NAME, ns = ...
 
@@ -23,6 +23,14 @@ local PATH_FACTOR = 1.35      -- real paths wind around terrain and mobs
 local TALK_TIME = 12          -- per pickup or turn-in (walking up, reading, accepting)
 local OBJECT_TIME = 6         -- per object interaction (loot a crate, click a plant)
 local MAX_TWO_OPT_PASSES = 3
+local MAX_OR_OPT_PASSES = 3
+local OR_OPT_MAX_RUN = 3      -- Or-opt moves runs of 1..3 consecutive stops
+-- Route improvement (2-opt, Or-opt, 2-opt) stops after this many milliseconds per zone and
+-- keeps what it has, so a big zone never stalls a frame. Each zone is planned in its own frame.
+local IMPROVE_BUDGET_MS = 8
+local Now = debugprofilestop
+    or (GetTimePreciseSec and function() return GetTimePreciseSec() * 1000 end)
+    or function() return 0 end
 local DEFAULT_ZONE_SIZE = { 3400, 2300 } -- average classic zone in yards, when the client can't say
 local CLUSTER_RADIUS = 8      -- percent of zone width; spawns closer than this form one camp
 local MAX_CLUSTER_SAMPLE = 80
@@ -287,8 +295,8 @@ end
 
 --- Shortens the tour with 2-opt segment reversals. Reversing order[i..j] flips the relative
 --- order of every pair inside the segment, so it is only allowed when no precedence edge
---- connects two nodes that are both inside it.
-local function TwoOpt(nodes, order, start, yield)
+--- connects two nodes that are both inside it. Stops early once `deadline` (Now() ms) passes.
+local function TwoOpt(nodes, order, start, deadline)
     local n = #order
     if n < 4 then return order end
     local pos = {}
@@ -330,7 +338,90 @@ local function TwoOpt(nodes, order, start, yield)
                     b = At(i)
                 end
             end
-            if yield and i % 20 == 0 then yield() end
+            if deadline and i % 8 == 0 and Now() > deadline then return order end
+        end
+        if not improved then break end
+    end
+    return order
+end
+
+--- Or-opt: moves a run of 1-3 consecutive stops to the place in the tour where it adds the
+--- least distance (e.g. a lone pickup far from the rest goes next to nearby stops). A move is
+--- only made when it keeps every precedence rule:
+---   * moving the run later: none of the stops it jumps over may need a stop of the run first;
+---   * moving it earlier: no stop of the run may need one of the stops it jumps over.
+--- Stops early once `deadline` passes.
+local function OrOpt(nodes, order, start, deadline)
+    local n = #order
+    if n < 3 then return order end
+    local function At(i)
+        if i == 0 then return start end
+        return nodes[order[i]]
+    end
+
+    local function MoveOk(i, last, j)
+        if j > last then
+            local inRun = {}
+            for x = i, last do inRun[order[x]] = true end
+            for x = last + 1, j do
+                for _, p in ipairs(nodes[order[x]].preds) do
+                    if inRun[p] then return false end
+                end
+            end
+        else
+            local between = {}
+            for x = j + 1, i - 1 do between[order[x]] = true end
+            for x = i, last do
+                for _, p in ipairs(nodes[order[x]].preds) do
+                    if between[p] then return false end
+                end
+            end
+        end
+        return true
+    end
+
+    for _ = 1, MAX_OR_OPT_PASSES do
+        local improved = false
+        for k = 1, OR_OPT_MAX_RUN do
+            local i = 1
+            while i + k - 1 <= n do
+                if deadline and Now() > deadline then return order end
+                local last = i + k - 1
+                local a, first, final = At(i - 1), At(i), At(last)
+                local b = last < n and At(last + 1) or nil
+                -- Distance saved by taking the run out (the open tour has no edge after the end).
+                local saved = Dist(a, first) + (b and (Dist(final, b) - Dist(a, b)) or 0)
+                local bestJ, bestDelta
+                for j = 0, n do
+                    if j < i - 1 or j > last then
+                        -- Insert between stop j and the stop after it (skipping the run itself).
+                        local c = At(j)
+                        local nextIndex = j + 1
+                        if nextIndex >= i and nextIndex <= last then nextIndex = last + 1 end
+                        local d = nextIndex <= n and At(nextIndex) or nil
+                        local added = Dist(c, first) + (d and (Dist(final, d) - Dist(c, d)) or 0)
+                        local delta = added - saved
+                        if delta < -0.01 and (not bestDelta or delta < bestDelta) and MoveOk(i, last, j) then
+                            bestJ, bestDelta = j, delta
+                        end
+                    end
+                end
+                if bestJ then
+                    local run, rest = {}, {}
+                    for x = 1, n do
+                        if x >= i and x <= last then run[#run + 1] = order[x] else rest[#rest + 1] = order[x] end
+                    end
+                    local after = bestJ > last and bestJ - k or bestJ
+                    local moved = {}
+                    for x = 1, after do moved[#moved + 1] = rest[x] end
+                    for _, v in ipairs(run) do moved[#moved + 1] = v end
+                    for x = after + 1, #rest do moved[#moved + 1] = rest[x] end
+                    order = moved
+                    improved = true
+                else
+                    i = i + 1
+                end
+            end
         end
         if not improved then break end
     end
@@ -459,7 +550,10 @@ function Route.Compute(zone, ctx, yield)
     local start = { x = sx, y = sy }
     local order = NearestNeighbour(nodes, sx, sy)
     if yield then yield() end
-    order = TwoOpt(nodes, order, start, yield)
+    local deadline = Now() + IMPROVE_BUDGET_MS
+    order = TwoOpt(nodes, order, start, deadline)
+    order = OrOpt(nodes, order, start, deadline)
+    order = TwoOpt(nodes, order, start, deadline)
 
     local distance, actions = 0, 0
     local cur = start
@@ -492,3 +586,4 @@ end
 -- Exposed for tests.
 Route._NearestNeighbour = NearestNeighbour
 Route._TwoOpt = TwoOpt
+Route._OrOpt = OrOpt
