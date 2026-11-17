@@ -194,6 +194,22 @@ local function KillTimeText()
     return string.format(L.KT_ESTIMATE, seconds, n, KT.MIN_SAMPLES)
 end
 
+--- "Quest XP x1.05 (8 turn-ins)" style line for each measured factor, or nil when none is.
+local function CalibrationText(always)
+    local Cal = ns.Calibration
+    if not Cal then return nil end
+    local stats = Cal.Stats()
+    local q, k = stats.quest, stats.kill
+    if not always and q.source ~= "measured" and k.source ~= "measured" then return nil end
+    local function Part(entry, label, minSamples)
+        if entry.source == "measured" then
+            return string.format(L.CAL_MEASURED, label, entry.factor, entry.samples)
+        end
+        return string.format(L.CAL_PENDING, label, entry.samples, minSamples)
+    end
+    return Part(q, L.CAL_QUEST, Cal.MIN_QUEST_SAMPLES) .. "\n" .. Part(k, L.CAL_KILL, Cal.MIN_KILL_SAMPLES)
+end
+
 local HUNT_COLOR = {
     good = { 0.3, 1, 0.3 },
     fair = { 1, 0.82, 0 },
@@ -219,6 +235,7 @@ local function ShowZoneTooltip(row)
                 local lc = LevelColor(quest.level)
                 local levelText = quest.level and quest.level > 0 and quest.level or "?"
                 local left = string.format("%s[%s]|r %s", Hex(lc), levelText, quest.name)
+                if quest.elite then left = left .. " |cffff6040" .. L.TT_ELITE_TAG .. "|r" end
                 local right = FormatNumber(quest.xp) .. " XP"
                 if (quest.mobXP or 0) > 0 then
                     right = right .. Hex(C.muted) .. string.format(L.TT_QUEST_MOB, FormatNumber(quest.mobXP)) .. "|r"
@@ -237,7 +254,14 @@ local function ShowZoneTooltip(row)
     if (zone.mobXP or 0) > 0 then
         GameTooltip:AddDoubleLine(string.format(L.TT_MOB_XP, zone.kills or 0), FormatNumber(zone.mobXP) .. " XP", 1, 0.82, 0, 1, 1, 1)
     end
+    if (zone.restedXP or 0) > 0 then
+        GameTooltip:AddDoubleLine(L.TT_RESTED, "+" .. FormatNumber(zone.restedXP) .. " XP", 0.4, 0.6, 1, 0.4, 0.6, 1)
+    end
     GameTooltip:AddDoubleLine(L.TT_TOTAL_LABEL, FormatNumber(zone.score) .. " XP", 0.3, 1, 0.3, 0.3, 1, 0.3)
+    if (zone.eliteSkipped or 0) > 0 then
+        GameTooltip:AddLine(string.format(L.TT_ELITE_SKIPPED, zone.eliteSkipped, FormatNumber(zone.eliteSkippedXP or 0)),
+            0.6, 0.6, 0.6, true)
+    end
 
     if zone.routeTime then
         GameTooltip:AddLine(" ")
@@ -258,6 +282,8 @@ local function ShowZoneTooltip(row)
     end
 
     GameTooltip:AddLine(" ")
+    local calibration = CalibrationText()
+    if calibration then GameTooltip:AddLine(calibration, 0.6, 0.85, 1, true) end
     GameTooltip:AddLine(L.TT_ESTIMATE_NOTE, 0.5, 0.5, 0.5, true)
     GameTooltip:Show()
 end
@@ -682,6 +708,8 @@ ns.UI = {
     ApplyBackdrop = ApplyBackdrop,
     CreateButton = CreateButton,
     KillTimeText = KillTimeText,
+    CalibrationText = CalibrationText,
+    Rescan = function() ScheduleRefresh() end,
     --- The best zones from the last scan, in the current sort order.
     GetTopZones = function(n)
         local sorted = SortZones(lastList or {}, GetDB().sortMode)
@@ -738,6 +766,8 @@ events:RegisterEvent("QUEST_REMOVED")
 events:RegisterEvent("QUEST_TURNED_IN")
 events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- Joining or leaving a group changes whether elite / group quests are counted.
+pcall(events.RegisterEvent, events, "GROUP_ROSTER_UPDATE")
 events:SetScript("OnEvent", function(_, event, arg1)
     if event == "PLAYER_LOGIN" then
         GetDB()

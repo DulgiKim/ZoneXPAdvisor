@@ -16,9 +16,10 @@ local LINKS = {
 }
 
 local WIDTH, HEIGHT = 500, 500
-local TAB_KEYS = { "general", "killtime", "about" }
+local TAB_KEYS = { "general", "killtime", "accuracy", "about" }
 
 local frame, tabs, pages, killStatus, killStats, soloCheck, modeButtons, minimapCheck
+local eliteCheck, restedStatus, calibrationStatus
 
 local function Metadata(key)
     local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
@@ -215,6 +216,45 @@ local function BuildKillTime(page)
     reset:SetPoint("TOPLEFT", soloCheck, "BOTTOMLEFT", 4, -8)
 end
 
+local function RefreshAccuracy()
+    if not eliteCheck then return end
+    eliteCheck:SetChecked(ns.UI.GetDB().countEliteSolo and true or false)
+    local rested = ns.Engine and ns.Engine.RestedPool() or 0
+    restedStatus:SetText(rested > 0 and string.format(L.SET_RESTED_NOW, ns.UI.FormatNumber(rested)) or L.SET_RESTED_NONE)
+    calibrationStatus:SetText(ns.UI.CalibrationText(true) or "")
+end
+
+local function BuildAccuracy(page)
+    local title = SectionTitle(page, L.SET_ELITE_TITLE)
+    eliteCheck = CheckBox(page, L.SET_ELITE_SOLO, function(checked)
+        ns.UI.GetDB().countEliteSolo = checked
+        ns.UI.Rescan()
+    end)
+    eliteCheck:SetPoint("TOPLEFT", title, "BOTTOMLEFT", -4, -8)
+    local eliteDesc = Paragraph(page, L.SET_ELITE_DESC, eliteCheck, -4)
+    eliteDesc:SetPoint("TOPLEFT", eliteCheck, "BOTTOMLEFT", 4, -4)
+
+    local restedTitle = SectionTitle(page, L.SET_RESTED_TITLE, eliteDesc, -18)
+    local restedDesc = Paragraph(page, L.SET_RESTED_DESC, restedTitle)
+    restedStatus = Label(page, "", "GameFontHighlight")
+    restedStatus:SetPoint("TOPLEFT", restedDesc, "BOTTOMLEFT", 0, -6)
+    restedStatus:SetTextColor(0.4, 0.6, 1)
+
+    local calTitle = SectionTitle(page, L.SET_CAL_TITLE, restedStatus, -18)
+    local calDesc = Paragraph(page, L.SET_CAL_DESC, calTitle)
+    calibrationStatus = Label(page, "", "GameFontHighlight")
+    calibrationStatus:SetPoint("TOPLEFT", calDesc, "BOTTOMLEFT", 0, -6)
+    calibrationStatus:SetTextColor(0.6, 0.85, 1)
+
+    local reset = ns.UI.CreateButton(page, 170, L.SET_CAL_RESET, function()
+        if ns.Calibration then ns.Calibration.Reset() end
+        ns.UI.Print(L.CAL_RESET_DONE)
+        RefreshAccuracy()
+        ns.UI.Rescan()
+    end)
+    reset:SetPoint("TOPLEFT", calibrationStatus, "BOTTOMLEFT", 0, -10)
+end
+
 local function BuildAbout(page)
     local logo = page:CreateTexture(nil, "ARTWORK")
     logo:SetTexture(ns.ICON)
@@ -281,6 +321,7 @@ local function SelectTab(key)
     end
     ns.UI.GetDB().settingsTab = key
     if key == "killtime" then RefreshKillTime() end
+    if key == "accuracy" then RefreshAccuracy() end
     if key == "general" and minimapCheck then
         local db = ns.UI.GetDB()
         minimapCheck:SetChecked(not (db.minimap and db.minimap.hide))
@@ -344,6 +385,7 @@ local function CreateSettingsFrame()
 
     BuildGeneral(pages.general)
     BuildKillTime(pages.killtime)
+    BuildAccuracy(pages.accuracy)
     BuildAbout(pages.about)
 
     tinsert(UISpecialFrames, "ZoneXPAdvisorSettingsFrame") -- close with Escape

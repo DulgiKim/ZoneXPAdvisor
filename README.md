@@ -28,10 +28,12 @@ Built for **World of Warcraft Forever** (Interface 16001). Works for both **Alli
 - **Quest XP + kill XP** — quest rewards scaled with the classic XP rules, plus XP from the mobs your quests require (item drops estimated from drop rates). Kill XP follows the classic formula: level difference, grey = 0, elites ×2.
 - **Optimized quest route** — a precedence-aware route (pick up → objectives → turn in, chains in order) built with nearest-neighbour + 2-opt, with travel, fighting and talking time and **XP per hour**.
 - **Measured kill time** — your own pace from the time between kills in the same zone (median of the last 60, used after 20). Kills come from the game's death events; WoW Forever blocks the full combat log for addons, so it is not used.
+- **Rested XP and solo play** — rested XP doubles the kill XP of each zone's required kills (up to your rested pool); elite and group quests are left out while you play solo.
+- **XP calibration** — quest turn-ins and kills are compared with the predicted XP, and the median difference corrects later estimates for each character.
 - **Hunting-ground rating** — good / fair / sparse, from non-elite mobs at your level.
 - **UI** — XP bar with rested XP, rank badges, difficulty-colored levels, progress bars, current-zone highlight, sort by total XP or XP per hour, Auto / Alliance / Horde view.
 - **Minimap button** — left-click: window, right-click: settings, Shift + left-click: switch sort, drag: move. Also in the addon compartment.
-- **Settings** — General, Kill time and About tabs.
+- **Settings** — General, Kill time, Accuracy and About tabs.
 
 ## Commands
 
@@ -73,9 +75,11 @@ ZoneXP Advisor is an independent project and is not affiliated with or endorsed 
 - **퀘스트 + 처치 경험치**: 클래식 규칙으로 보상을 조정하고, 퀘스트 목표 몬스터의 경험치도 더합니다. 아이템 목표는 드롭률로 처치 수를 계산합니다.
 - **최적 퀘스트 동선**: 받기 → 목표 → 보고 순서를 지키는 경로를 최근접 이웃 + 2-opt로 계산하고, 소요 시간과 **시간당 경험치**를 보여줍니다.
 - **전투 시간 실측**: 같은 지역 처치 간격의 중앙값(최근 60마리, 20마리부터 적용). 게임의 사망 이벤트로 감지하며, 포에버는 전투 로그를 막기 때문에 전투 로그는 쓰지 않습니다.
+- **휴식 경험치와 솔로 플레이**: 휴식 경험치만큼 목표 몬스터 처치 경험치를 더하고, 혼자 플레이할 때는 정예/파티 퀘스트를 뺍니다.
+- **경험치 보정**: 퀘스트 보고와 처치 때 예상값과 실제 경험치를 비교해서 캐릭터별로 이후 계산을 보정합니다.
 - **사냥터 등급**: 내 레벨의 일반 몬스터 수로 좋음 / 보통 / 적음
 - **미니맵 버튼**: 왼쪽 클릭 창, 오른쪽 클릭 설정, Shift + 왼쪽 클릭 정렬 전환, 드래그 이동
-- **설정 창**: 일반 / 전투 시간 / 정보 탭
+- **설정 창**: 일반 / 전투 시간 / 정확도 / 정보 탭
 
 ### 명령어
 

@@ -138,6 +138,20 @@ end
 -- Player state
 ---------------------------------------------------------------------------------------------
 
+--- Rested XP left in the pool (0 when none).
+function Engine.RestedPool()
+    local rested = GetXPExhaustion and GetXPExhaustion()
+    if type(rested) == "number" and rested > 0 then return rested end
+    return 0
+end
+
+--- Elite and group quests count when the player is in a group or opted in for solo play.
+function Engine.CountEliteQuests()
+    local db = ZoneXPAdvisorDB
+    if db and db.countEliteSolo then return true end
+    return (IsInGroup and IsInGroup()) and true or false
+end
+
 local function GetCompletedQuests()
     local completed = {}
     if C_QuestLog and C_QuestLog.GetAllCompletedQuestIDs then
@@ -163,7 +177,10 @@ local function ReadQuestLog()
                 local complete = C_QuestLog.IsComplete and C_QuestLog.IsComplete(info.questID)
                 local failed = C_QuestLog.IsFailed and C_QuestLog.IsFailed(info.questID)
                 if not failed then
-                    log[info.questID] = { title = info.title, level = info.level, complete = complete and true or false }
+                    log[info.questID] = {
+                        title = info.title, level = info.level, complete = complete and true or false,
+                        suggestedGroup = info.suggestedGroup,
+                    }
                 end
             end
         end
@@ -214,7 +231,7 @@ local function EstimateXP(questId, playerLevel)
     if entry then
         local level, xp = entry[1], entry[2]
         if level and xp and level > 0 and xp > 0 then
-            return ScaleXP(xp, level, playerLevel)
+            return ScaleXP(xp, level, playerLevel), true
         end
     end
     if GetQuestLogRewardXP and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
@@ -222,10 +239,19 @@ local function EstimateXP(questId, playerLevel)
         local index = C_QuestLog.GetLogIndexForQuestID(questId)
         if index then
             local ok, xp = pcall(GetQuestLogRewardXP, questId)
-            if ok and type(xp) == "number" then return xp end
+            if ok and type(xp) == "number" then return xp, false end
         end
     end
-    return 0
+    return 0, false
+end
+
+--- Quest XP predicted from the DB alone (no calibration), or nil. Used by Calibration.lua.
+function Engine.PredictQuestXP(questId, playerLevel)
+    Engine.InitDataSource()
+    local entry = questXP and questXP[questId]
+    if entry and entry[1] and entry[2] and entry[1] > 0 and entry[2] > 0 then
+        return ScaleXP(entry[2], entry[1], playerLevel)
+    end
 end
 
 ---------------------------------------------------------------------------------------------
@@ -260,6 +286,11 @@ local function ZeroDifference(playerLevel)
     return 17
 end
 
+--- QuestieDB rank: 1 elite, 2 rare elite, 3 boss count as elite (4 = rare, a normal mob).
+local function IsEliteRank(rank)
+    return rank ~= nil and rank > 0 and rank ~= 4
+end
+
 --- Classic solo kill XP (no rested bonus, no group split). Elites give double.
 local function KillXP(mobLevel, rank, playerLevel)
     if not mobLevel or mobLevel <= 0 then return 0 end
@@ -271,9 +302,14 @@ local function KillXP(mobLevel, rank, playerLevel)
         if mobLevel <= GreyLevel(playerLevel) then return 0 end
         xp = base * (1 - (playerLevel - mobLevel) / ZeroDifference(playerLevel))
     end
-    if rank and rank > 0 and rank ~= 4 then xp = xp * 2 end -- elite, rare elite, boss (4 = rare)
+    if IsEliteRank(rank) then xp = xp * 2 end
     return max(floor(xp), 0)
 end
+Engine.KillXP = KillXP
+Engine.GreyLevel = GreyLevel
+
+-- Calibration factors (actual / predicted XP) captured at the start of each scan.
+local questFactor, killFactor = 1, 1
 
 local npcXPCache = {}
 
@@ -284,9 +320,13 @@ local function NpcKillXP(npcId, playerLevel)
     local lo = NpcDB.minLevel(npcId) or 0
     local hi = NpcDB.maxLevel(npcId) or lo
     local rank = NpcDB.rank(npcId) or 0
-    local xp = (KillXP(lo, rank, playerLevel) + KillXP(hi, rank, playerLevel)) / 2
+    local xp = (KillXP(lo, rank, playerLevel) + KillXP(hi, rank, playerLevel)) / 2 * killFactor
     npcXPCache[npcId] = xp
     return xp
+end
+
+local function NpcIsElite(npcId)
+    return IsEliteRank(NpcDB.rank(npcId) or 0)
 end
 
 --- Numbers in the objective text ("Kill 10 ...", "bring 8 ..."), in order.
@@ -328,20 +368,24 @@ local function ItemObjectiveXP(itemId, count, playerLevel)
 
     local rates = GetDropRates()
     local itemRates = rates and rates[itemId]
-    local bestRate, bestXP, bestNpc = 0, 0, nil
+    -- Best dropper among normal mobs and among elites; elites only when nothing else drops it.
+    local normal, elites = { rate = 0, xp = 0 }, { rate = 0, xp = 0 }
     for _, npcId in ipairs(npcs) do
         local xp = NpcKillXP(npcId, playerLevel)
         if xp > 0 then
             local rate = (itemRates and itemRates[npcId]) or DEFAULT_DROP_RATE
+            local b = NpcIsElite(npcId) and elites or normal
             -- Prefer the mob that yields the item fastest.
-            if rate > bestRate or (rate == bestRate and xp > bestXP) then
-                bestRate, bestXP, bestNpc = rate, xp, npcId
+            if rate > b.rate or (rate == b.rate and xp > b.xp) then
+                b.rate, b.xp, b.npc = rate, xp, npcId
             end
         end
     end
-    if bestXP <= 0 then return 0, 0 end
-    local kills = min(count / (bestRate / 100), count * MAX_KILLS_PER_ITEM)
-    return kills, kills * bestXP, bestNpc
+    local b, elite = normal, false
+    if b.xp <= 0 then b, elite = elites, true end
+    if b.xp <= 0 then return 0, 0 end
+    local kills = min(count / (b.rate / 100), count * MAX_KILLS_PER_ITEM)
+    return kills, kills * b.xp, b.npc, elite
 end
 
 --- XP from the kills a quest's objectives require. Uses live counts for quests in the log.
@@ -349,7 +393,7 @@ end
 local function ObjectiveMobXP(questId, playerLevel, inLog)
     local targets = {}
     local objectives = QuestDB.objectives(questId)
-    if type(objectives) ~= "table" then return 0, 0, targets end
+    if type(objectives) ~= "table" then return 0, 0, targets, false end
 
     local creatures, objects, items, credits = objectives[1], objectives[2], objectives[3], objectives[5]
     local live = inLog and LogCounts(questId)
@@ -362,8 +406,10 @@ local function ObjectiveMobXP(questId, playerLevel, inLog)
 
     local totalXP, totalKills = 0, 0
     local monsterIndex, itemIndex = 0, 0
+    local elite = false
 
     local function AddKills(npcId, count)
+        if count > 0 and NpcIsElite(npcId) then elite = true end
         local xp = NpcKillXP(npcId, playerLevel)
         totalXP = totalXP + xp * count
         totalKills = totalKills + count
@@ -398,7 +444,8 @@ local function ObjectiveMobXP(questId, playerLevel, inLog)
             itemIndex = itemIndex + 1
             local count = live and (live.item[itemIndex] or 0) or NextTextCount()
             if o[1] then
-                local kills, xp, npcId = ItemObjectiveXP(o[1], count, playerLevel)
+                local kills, xp, npcId, eliteDrop = ItemObjectiveXP(o[1], count, playerLevel)
+                if eliteDrop and kills > 0 then elite = true end
                 totalXP = totalXP + xp
                 totalKills = totalKills + kills
                 if npcId and kills > 0 then
@@ -413,7 +460,7 @@ local function ObjectiveMobXP(questId, playerLevel, inLog)
             end
         end
     end
-    return floor(totalXP), floor(totalKills + 0.5), targets
+    return floor(totalXP), floor(totalKills + 0.5), targets, elite
 end
 
 ---------------------------------------------------------------------------------------------
@@ -508,6 +555,9 @@ local function NewZone(zoneId)
         kills = 0,
         count = 0,
         inLog = 0,
+        restedXP = 0,  -- extra kill XP from the rested pool, filled by FinishZones
+        eliteSkipped = 0,   -- elite / group quests left out of the score (solo play)
+        eliteSkippedXP = 0,
         hunt = 0,      -- hunting-ground potential (spawns x kill XP), filled after the quest pass
         minLevel = nil,
         maxLevel = nil,
@@ -524,7 +574,7 @@ local function GetZone(zones, zoneId)
     return zone
 end
 
-local function AddToZone(zones, zoneId, questId, name, questLevel, xp, status, mobXP, kills, targets)
+local function AddToZone(zones, zoneId, questId, name, questLevel, xp, status, mobXP, kills, targets, elite)
     local zone = GetZone(zones, zoneId)
     mobXP, kills = mobXP or 0, kills or 0
     local weight = WEIGHT[status] or 1
@@ -540,7 +590,7 @@ local function AddToZone(zones, zoneId, questId, name, questLevel, xp, status, m
     end
     zone.quests[#zone.quests + 1] = {
         id = questId, name = name, level = questLevel, status = status,
-        xp = xp, mobXP = mobXP, kills = kills, total = xp + mobXP, targets = targets,
+        xp = xp, mobXP = mobXP, kills = kills, total = xp + mobXP, targets = targets, elite = elite,
     }
 end
 
@@ -573,6 +623,8 @@ local function NewContext(factionMode)
         completed = GetCompletedQuests(),
         log = isOwn and ReadQuestLog() or {},
         statusCache = {},
+        countElite = Engine.CountEliteQuests(),
+        rested = Engine.RestedPool(),
     }
 end
 
@@ -696,17 +748,27 @@ local function ScoreQuest(ctx, zones, questId)
     local zone = ResolveZone(questId, zoneOrSort, startedBy)
     if not zone or dungeonAreas[zone] then return end
 
-    local xp = EstimateXP(questId, ctx.playerLevel)
+    local xp, fromDB = EstimateXP(questId, ctx.playerLevel)
     if xp <= 0 then return end
+    if fromDB then xp = floor(xp * questFactor + 0.5) end
 
-    local mobXP, kills, targets = 0, 0, nil
+    local mobXP, kills, targets, elite = 0, 0, nil, false
     if status ~= "ready" then
-        mobXP, kills, targets = ObjectiveMobXP(questId, ctx.playerLevel, logEntry ~= nil)
+        mobXP, kills, targets, elite = ObjectiveMobXP(questId, ctx.playerLevel, logEntry ~= nil)
+        if logEntry and (logEntry.suggestedGroup or 0) > 1 then elite = true end
+        -- Elite / group quests need a party; solo players skip them unless they opt in.
+        -- Quests that only need turning in are always counted.
+        if elite and not ctx.countElite then
+            local z = GetZone(zones, zone)
+            z.eliteSkipped = z.eliteSkipped + 1
+            z.eliteSkippedXP = z.eliteSkippedXP + xp + mobXP
+            return
+        end
     end
 
     local name = (logEntry and logEntry.title) or QuestDB.name(questId) or ("#" .. questId)
     local questLevel = QuestDB.questLevel(questId) or (logEntry and logEntry.level)
-    AddToZone(zones, zone, questId, name, questLevel, xp, status, mobXP, kills, targets)
+    AddToZone(zones, zone, questId, name, questLevel, xp, status, mobXP, kills, targets, elite)
 end
 
 --- Adds one NPC's spawns to the hunting-ground totals if it is a good solo target.
@@ -801,10 +863,14 @@ local function RateHunting(list, hunt)
     end
 end
 
-local function FinishZones(zones, hunt)
+--- `rested` is the player's rested pool: kill XP is doubled until it runs out, so each zone
+--- gains up to that much extra XP from the kills its quests require.
+local function FinishZones(zones, hunt, rested)
     local list = {}
     for _, zone in pairs(zones) do
         if zone.score > 0 then
+            zone.restedXP = floor(min(rested or 0, zone.mobXP))
+            zone.score = zone.questXP + zone.mobXP + zone.restedXP
             table.sort(zone.quests, function(a, b) return a.total > b.total end)
             if type(zone.zoneId) == "number" then
                 zone.name = (C_Map and C_Map.GetAreaInfo and C_Map.GetAreaInfo(zone.zoneId)) or ("Zone " .. zone.zoneId)
@@ -833,6 +899,10 @@ function Engine.StartScan(factionMode, onProgress, onDone)
         onDone(FinishZones(zones), { playerLevel = UnitLevel("player"), faction = Engine.GetPlayerFaction() })
         return
     end
+
+    local calibration = ns.Calibration
+    questFactor = calibration and calibration.QuestFactor() or 1
+    killFactor = calibration and calibration.KillFactor() or 1
 
     local ctx = NewContext(factionMode)
     ctx.greyLevel = GreyLevel(ctx.playerLevel)
@@ -884,7 +954,7 @@ function Engine.StartScan(factionMode, onProgress, onDone)
 
         -- Routes for the best zones, one zone per frame. Route.Compute runs inside pcall,
         -- so it must not yield (WoW's Lua cannot yield across pcall).
-        local list = FinishZones(zones, hunt)
+        local list = FinishZones(zones, hunt, ctx.rested)
         local routeCount = min(ROUTE_ZONES, #list)
         for i = 1, routeCount do
             local zone = list[i]
@@ -905,13 +975,13 @@ function Engine.StartScan(factionMode, onProgress, onDone)
             Engine.lastError = progress
             activeScan = nil
             self:SetScript("OnUpdate", nil)
-            onDone(FinishZones(zones, hunt), ctx)
+            onDone(FinishZones(zones, hunt, ctx.rested), ctx)
             return
         end
         if coroutine.status(activeScan) == "dead" then
             activeScan = nil
             self:SetScript("OnUpdate", nil)
-            onDone(finalList or FinishZones(zones, hunt), ctx)
+            onDone(finalList or FinishZones(zones, hunt, ctx.rested), ctx)
         elseif progress and onProgress then
             onProgress(progress)
         end

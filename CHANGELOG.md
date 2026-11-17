@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 (Beta)
+
+### English
+- Rested XP: kill XP is doubled while you are rested, so each zone now gets the extra XP from its required kills, up to your rested pool. Shown in the zone tooltip.
+- Elite and group quests are left out while you play solo (quests that need elite kills, or that suggest a group). They are counted in a group, or when enabled in Settings → Accuracy. The tooltip shows how many were left out, and counted ones are tagged [Elite].
+- Item objectives prefer normal mobs over elites when both drop the item.
+- XP calibration: quest turn-ins and solo kills of a targeted mob are compared with the predicted XP. After 3 turn-ins / 5 kills, the median difference corrects later estimates for that character.
+- New Settings tab "Accuracy" with the elite option, your current rested XP and the calibration status (with a reset button).
+
+### 한국어
+- 휴식 경험치: 휴식 경험치가 있으면 처치 경험치가 2배가 되므로, 각 지역의 목표 몬스터 경험치에 남은 휴식 경험치만큼 더합니다. 지역 툴팁에 표시됩니다.
+- 혼자 플레이할 때는 정예/파티 퀘스트(정예 몬스터를 잡아야 하거나 파티를 권장하는 퀘스트)를 계산에서 뺍니다. 파티 중이거나 설정 → 정확도에서 켜면 포함하며, 툴팁에 뺀 개수가 나오고 포함된 퀘스트에는 [정예]가 붙습니다.
+- 아이템 목표는 일반 몬스터와 정예 몬스터가 모두 떨구면 일반 몬스터 기준으로 계산합니다.
+- 경험치 보정: 퀘스트 보고와, 혼자서 대상으로 잡은 몬스터 처치 때 예상 경험치와 실제 경험치를 비교합니다. 퀘스트 3회 / 처치 5회가 쌓이면 그 차이의 중앙값으로 그 캐릭터의 이후 계산을 보정합니다.
+- 설정에 "정확도" 탭 추가: 정예 퀘스트 옵션, 현재 휴식 경험치, 보정 상태(초기화 버튼 포함)
+
 ## 0.4.2 (Beta)
 
 ### English
