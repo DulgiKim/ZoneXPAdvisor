@@ -9,6 +9,7 @@
 - Move-on alert: a chat and on-screen message when your zone has little XP left, or another zone gives at least 1.5x the XP per hour. Not shown in towns, inns or instances, and the same advice is repeated at most every 15 minutes. Can be turned off in Settings → Guide.
 - Zones are now re-checked in the background after quest, level and zone changes (at most every 45 seconds, never in combat or on a flight), so the panel, the alert and the minimap tooltip stay current with the window closed.
 - New Settings tab "Guide".
+- The zone you are in no longer drops down the list just because you finished some of its quests: the total XP sort subtracts the XP you would miss while travelling to each zone (the zone you stand in costs nothing), and the XP-per-hour sort lowers nearly finished zones step by step instead of dropping them to the bottom at once.
 
 ### 한국어
 - 첫 정식 버전입니다.
@@ -17,6 +18,7 @@
 - 이동 알림: 지금 지역에 남은 경험치가 적거나, 다른 지역의 시간당 경험치가 1.5배 이상이면 채팅과 화면 메시지로 알려 줍니다. 마을, 여관, 인스턴스에서는 알리지 않고, 같은 알림은 15분에 한 번만 나옵니다. 설정 → 가이드에서 끌 수 있습니다.
 - 퀘스트, 레벨, 지역이 바뀌면 창을 닫아 둔 상태에서도 지역을 다시 계산합니다(최대 45초에 한 번, 전투 중이나 비행 중에는 하지 않음). 그래서 패널, 알림, 미니맵 툴팁이 항상 최신 상태로 유지됩니다.
 - 설정에 "가이드" 탭 추가
+- 지금 있는 지역의 퀘스트를 일부 끝냈다고 그 지역이 목록에서 갑자기 밀려나지 않습니다. 총 경험치 정렬은 각 지역까지 이동하는 동안 놓치는 경험치를 빼고(지금 있는 지역은 0), 시간당 경험치 정렬은 거의 끝난 지역을 한 번에 맨 아래로 보내지 않고 조금씩 낮춥니다.
 
 ## 0.6.0 (Beta)
 

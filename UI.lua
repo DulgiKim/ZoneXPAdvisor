@@ -89,25 +89,71 @@ local function FormatDuration(seconds)
     return string.format(L.HOURS_MINUTES, math.floor(minutes / 60), minutes % 60)
 end
 
--- A zone must offer at least this share of the next level and this much play time to win
--- the XP-per-hour sort: a city with one turn-in has a huge rate but won't level you.
-local RATE_MIN_SHARE = 0.25
-local RATE_MIN_TIME = 20 * 60
+-- XP-per-hour sort: a zone with little left (a city with one turn-in) has a huge rate but
+-- won't level you. Below this share of the next level or this much play time its rate is
+-- scaled down (by the square of the shortfall), so a nearly finished zone slides down gradually instead of
+-- dropping to the bottom at once (which used to happen right after a level-up).
+local RATE_FULL_SHARE = 0.25
+local RATE_FULL_TIME = 20 * 60
+
+local function Median(values)
+    if #values == 0 then return nil end
+    table.sort(values)
+    local n = #values
+    if n % 2 == 1 then return values[(n + 1) / 2] end
+    return (values[n / 2] + values[n / 2 + 1]) / 2
+end
+
+--- Total-XP sort key: the XP left in the zone minus the XP you would have earned in the
+--- time it takes to get there. The zone you stand in pays nothing, so it is not pushed
+--- down by an untouched zone that is only slightly bigger but a flight away.
+local function TravelAdjustedScores(list)
+    local here = GetRealZoneText and GetRealZoneText() or nil
+    local rates, approaches = {}, {}
+    for _, zone in ipairs(list) do
+        if zone.xpPerHour and zone.xpPerHour > 0 then rates[#rates + 1] = zone.xpPerHour end
+        if zone.approachTime and zone.approachTime > 0 then approaches[#approaches + 1] = zone.approachTime end
+    end
+    local rate = Median(rates) or 0
+    local typicalApproach = Median(approaches) or 0
+    local keys = {}
+    for _, zone in ipairs(list) do
+        local approach
+        if zone.isCurrent or (here and zone.name == here) then
+            approach = 0
+        else
+            -- Unknown (no route planned, or position unavailable): a typical trip.
+            approach = zone.approachTime or typicalApproach
+        end
+        keys[zone] = zone.score - approach / 3600 * rate
+    end
+    return keys
+end
 
 --- Returns a sorted copy of the zone list for the chosen sort mode.
 local function SortZones(list, mode)
     local sorted = {}
     for i, zone in ipairs(list) do sorted[i] = zone end
-    if mode ~= "rate" then return sorted end
-    local remaining = math.max(UnitXPMax("player") - UnitXP("player"), 1)
-    local function Key(zone)
-        if not zone.xpPerHour then return -1 end
-        if zone.score / remaining < RATE_MIN_SHARE or (zone.routeTime or 0) < RATE_MIN_TIME then
-            return zone.xpPerHour / 1e6
+    local keys = {}
+    if mode == "rate" then
+        local remaining = math.max(UnitXPMax("player") - UnitXP("player"), 1)
+        for _, zone in ipairs(sorted) do
+            if zone.xpPerHour then
+                local share = math.min(1, zone.score / remaining / RATE_FULL_SHARE)
+                local time = math.min(1, (zone.routeTime or 0) / RATE_FULL_TIME)
+                -- Squared: a slightly short zone loses little, a nearly empty one a lot.
+                keys[zone] = zone.xpPerHour * share * share * time * time
+            else
+                keys[zone] = -1
+            end
         end
-        return zone.xpPerHour
+    else
+        keys = TravelAdjustedScores(sorted)
     end
-    table.sort(sorted, function(a, b) return Key(a) > Key(b) end)
+    table.sort(sorted, function(a, b)
+        if keys[a] ~= keys[b] then return keys[a] > keys[b] end
+        return a.score > b.score
+    end)
     return sorted
 end
 
