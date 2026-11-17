@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0
+
+### English
+- First stable release.
+- Next-steps panel: shows the next 5 stops of the planned route in the zone you are in (quests to pick up, mobs to kill, items to collect, quests to turn in). Finished steps disappear as you play. Click a step to set a map waypoint (TomTom is used when installed). Open it with the "Next steps" button, /zxp next, or Settings → Guide.
+- Session report: XP gained this session and XP per hour, split into quest XP and kill XP, per-zone time and XP per hour compared with the predicted rate, and the time to your next level at this pace. Time AFK is not counted; a new session starts after 30 minutes offline. Open it with the "Session" button or /zxp session.
+- Move-on alert: a chat and on-screen message when your zone has little XP left, or another zone gives at least 1.5x the XP per hour. Not shown in towns, inns or instances, and the same advice is repeated at most every 15 minutes. Can be turned off in Settings → Guide.
+- Zones are now re-checked in the background after quest, level and zone changes (at most every 45 seconds, never in combat or on a flight), so the panel, the alert and the minimap tooltip stay current with the window closed.
+- New Settings tab "Guide".
+
+### 한국어
+- 첫 정식 버전입니다.
+- 다음 할 일 패널: 지금 있는 지역의 최적 동선에서 다음 5단계를 보여 줍니다. 받을 퀘스트, 잡을 몬스터, 모을 아이템, 보고할 퀘스트 순서입니다. 끝낸 단계는 플레이하면서 자동으로 사라지고, 클릭하면 지도에 목적지를 표시합니다(TomTom이 있으면 TomTom 사용). "다음 할 일" 버튼, /zxp next, 또는 설정 → 가이드에서 켤 수 있습니다.
+- 세션 리포트: 이번 세션에 얻은 경험치와 시간당 경험치, 퀘스트/처치 경험치 비율, 지역별 시간과 시간당 경험치(예상값 대비), 지금 속도로 다음 레벨까지 걸리는 시간을 보여 줍니다. 자리 비움 시간은 빼고, 30분 넘게 접속하지 않으면 새 세션이 시작됩니다. "세션" 버튼이나 /zxp session 으로 엽니다.
+- 이동 알림: 지금 지역에 남은 경험치가 적거나, 다른 지역의 시간당 경험치가 1.5배 이상이면 채팅과 화면 메시지로 알려 줍니다. 마을, 여관, 인스턴스에서는 알리지 않고, 같은 알림은 15분에 한 번만 나옵니다. 설정 → 가이드에서 끌 수 있습니다.
+- 퀘스트, 레벨, 지역이 바뀌면 창을 닫아 둔 상태에서도 지역을 다시 계산합니다(최대 45초에 한 번, 전투 중이나 비행 중에는 하지 않음). 그래서 패널, 알림, 미니맵 툴팁이 항상 최신 상태로 유지됩니다.
+- 설정에 "가이드" 탭 추가
+
 ## 0.6.0 (Beta)
 
 ### English

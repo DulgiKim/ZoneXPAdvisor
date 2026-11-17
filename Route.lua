@@ -163,8 +163,13 @@ local function BuildNodes(zone, ctx, data, width, height)
     local turnInOf = {} -- questId -> node index
     local pickupOf = {}
 
-    local function Add(x, y, duration, preds, questId)
-        nodes[#nodes + 1] = { x = x / 100 * width, y = y / 100 * height, duration = duration, preds = preds, quest = questId }
+    -- kind: "pickup", "objective" or "turnin"; px/py keep the map position in percent for the
+    -- next-steps panel; target is the objective's {kind, id, count}.
+    local function Add(x, y, duration, preds, questId, kind, target)
+        nodes[#nodes + 1] = {
+            x = x / 100 * width, y = y / 100 * height, px = x, py = y,
+            duration = duration, preds = preds, quest = questId, kind = kind, target = target,
+        }
         return #nodes
     end
 
@@ -181,7 +186,7 @@ local function BuildNodes(zone, ctx, data, width, height)
                 if not x then x, y = FirstSpawn(data, "object", startedBy[2], zone.zoneId) end
             end
             if x then
-                local index = Add(x, y, TALK_TIME, {}, id)
+                local index = Add(x, y, TALK_TIME, {}, id, "pickup")
                 pickupOf[id] = index
                 preds = { index }
             end
@@ -200,7 +205,7 @@ local function BuildNodes(zone, ctx, data, width, height)
                     else
                         duration = target.count * KillTime(data, ctx.playerLevel, target.id)
                     end
-                    objectiveNodes[#objectiveNodes + 1] = Add(x, y, duration, preds, id)
+                    objectiveNodes[#objectiveNodes + 1] = Add(x, y, duration, preds, id, "objective", target)
                 end
             end
         end
@@ -214,7 +219,7 @@ local function BuildNodes(zone, ctx, data, width, height)
                 local turnPreds = {}
                 for _, p in ipairs(preds) do turnPreds[#turnPreds + 1] = p end
                 for _, o in ipairs(objectiveNodes) do turnPreds[#turnPreds + 1] = o end
-                turnInOf[id] = Add(x, y, TALK_TIME, turnPreds, id)
+                turnInOf[id] = Add(x, y, TALK_TIME, turnPreds, id, "turnin")
             end
         end
     end
@@ -392,6 +397,28 @@ local function QuestsInRouteOrder(zone, nodes, order)
     return list
 end
 
+--- The route as a list of steps for the next-steps panel (capped; the panel shows a few).
+local MAX_STEPS = 60
+local function RouteSteps(zone, nodes, order)
+    local names = {}
+    for _, q in ipairs(zone.quests) do names[q.id] = q.name end
+    local steps = {}
+    for _, index in ipairs(order) do
+        local node = nodes[index]
+        if node.kind then
+            local target = node.target
+            steps[#steps + 1] = {
+                kind = node.kind, quest = node.quest, name = names[node.quest],
+                x = node.px, y = node.py,
+                targetKind = target and target.kind, targetId = target and target.id,
+                count = target and target.count,
+            }
+            if #steps >= MAX_STEPS then break end
+        end
+    end
+    return steps
+end
+
 ---------------------------------------------------------------------------------------------
 -- Public
 ---------------------------------------------------------------------------------------------
@@ -457,6 +484,8 @@ function Route.Compute(zone, ctx, yield)
     zone.approachTime = approach
     zone.routeTime = travel + actions + (approach or 0)
     zone.routeStops = #order
+    zone.routeSteps = RouteSteps(zone, nodes, order)
+    zone.uiMapId = UiMapFor(zone.zoneId, data)
     zone.xpPerHour = zone.routeTime > 0 and zone.score / (zone.routeTime / 3600) or 0
 end
 

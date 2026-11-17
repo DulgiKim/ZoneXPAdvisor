@@ -6,7 +6,7 @@
 
 Built for **World of Warcraft Forever** (Interface 16001). Works for both **Alliance** and **Horde**.
 
-> **Beta:** numbers are estimates — please report anything that looks off in [Issues](../../issues).
+> Numbers are estimates — please report anything that looks off in [Issues](../../issues) or on [Discord](https://discord.gg/yEf4RJbA3Y).
 
 [한국어 설명은 아래에 있습니다 ↓](#한국어)
 
@@ -31,9 +31,12 @@ Built for **World of Warcraft Forever** (Interface 16001). Works for both **Alli
 - **Rested XP and solo play** — rested XP doubles the kill XP of each zone's required kills (up to your rested pool); elite and group quests are left out while you play solo.
 - **XP calibration** — quest turn-ins and kills are compared with the predicted XP, and the median difference corrects later estimates for each character.
 - **Hunting-ground rating** — good / fair / sparse, from non-elite mobs at your level.
+- **Next-steps panel** — the next 5 stops of the route in the zone you are in (pick up, kill / collect, turn in). Finished steps disappear as you play; click one to set a waypoint (TomTom when installed).
+- **Session report** — XP per hour this session, quest vs. kill XP, per-zone rate compared with the prediction, and time to your next level.
+- **Move-on alert** — a message when your zone has little XP left or another zone gives at least 1.5x the XP per hour (not in towns, inns or instances).
 - **UI** — XP bar with rested XP, rank badges, difficulty-colored levels, progress bars, current-zone highlight, sort by total XP or XP per hour, Auto / Alliance / Horde view.
 - **Minimap button** — left-click: window, right-click: settings, Shift + left-click: switch sort, drag: move. Also in the addon compartment.
-- **Settings** — General, Kill time, Accuracy and About tabs. Language: game language, English or 한국어.
+- **Settings** — General, Guide, Kill time, Accuracy and About tabs. Language: game language, English or 한국어.
 
 ## Commands
 
@@ -41,6 +44,8 @@ Built for **World of Warcraft Forever** (Interface 16001). Works for both **Alli
 |---|---|
 | `/zxp` or `/levelzone` | Open / close the window |
 | `/zxp config` | Open settings |
+| `/zxp next` | Show / hide the next-steps panel |
+| `/zxp session` | Open the session report (`/zxp session reset` starts a new one) |
 | `/zxp killtime` | Show kill-time status (`/zxp killtime reset` clears it) |
 | `/zxp minimap` | Show / hide the minimap button |
 | `/zxp reset` | Move the window to the center |
@@ -78,12 +83,15 @@ ZoneXP Advisor is an independent project and is not affiliated with or endorsed 
 - **휴식 경험치와 솔로 플레이**: 휴식 경험치만큼 목표 몬스터 처치 경험치를 더하고, 혼자 플레이할 때는 정예/파티 퀘스트를 뺍니다.
 - **경험치 보정**: 퀘스트 보고와 처치 때 예상값과 실제 경험치를 비교해서 캐릭터별로 이후 계산을 보정합니다.
 - **사냥터 등급**: 내 레벨의 일반 몬스터 수로 좋음 / 보통 / 적음
+- **다음 할 일 패널**: 지금 있는 지역 동선의 다음 5단계(받기, 처치/수집, 보고). 끝낸 단계는 자동으로 사라지고, 클릭하면 목적지를 표시합니다(TomTom이 있으면 TomTom 사용).
+- **세션 리포트**: 이번 세션 시간당 경험치, 퀘스트/처치 비율, 지역별 실제와 예상 비교, 다음 레벨까지 남은 시간
+- **이동 알림**: 이 지역에 남은 경험치가 적거나 다른 지역이 시간당 1.5배 이상이면 알려 줍니다(마을, 여관, 인스턴스 제외).
 - **미니맵 버튼**: 왼쪽 클릭 창, 오른쪽 클릭 설정, Shift + 왼쪽 클릭 정렬 전환, 드래그 이동
-- **설정 창**: 일반 / 전투 시간 / 정확도 / 정보 탭. 언어: 게임 언어 / English / 한국어
+- **설정 창**: 일반 / 가이드 / 전투 시간 / 정확도 / 정보 탭. 언어: 게임 언어 / English / 한국어
 
 ### 명령어
 
-`/zxp` 창 열기 · `/zxp config` 설정 · `/zxp killtime` 전투 시간 상태 · `/zxp minimap` 미니맵 버튼 · `/zxp reset` 창 위치 초기화 · `/zxp debug` 버그 제보용 정보
+`/zxp` 창 열기 · `/zxp config` 설정 · `/zxp next` 다음 할 일 패널 · `/zxp session` 세션 리포트 · `/zxp killtime` 전투 시간 상태 · `/zxp minimap` 미니맵 버튼 · `/zxp reset` 창 위치 초기화 · `/zxp debug` 버그 제보용 정보
 
 ### 필요 조건
 

@@ -48,7 +48,14 @@ local FACTION_MODES = { "auto", "Alliance", "Horde" }
 
 local frame, rows, statusText, factionButton, factionIcon, sortButton
 local xpBar, restedBar, xpText, playerText, zoneText, progressBar
-local pendingRefresh, refreshAfterCombat
+local pendingRefresh, refreshAfterCombat, backgroundAfterCombat, backgroundPending
+local lastBackground = -1e9
+-- Scans without the window (for the next-steps panel and move-on alerts) wait at least this
+-- long after the previous one, unless the level or zone changed.
+local BACKGROUND_MIN_GAP = 45
+
+-- Functions called with the zone list after every finished scan (Coach.lua listens).
+local scanListeners = {}
 
 local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cffffd100ZoneXP Advisor|r " .. tostring(msg))
@@ -423,6 +430,13 @@ end
 
 local lastList = {}
 
+local function NotifyScan(list)
+    for _, fn in ipairs(scanListeners) do
+        local ok, err = pcall(fn, list)
+        if not ok then Engine.lastError = err end
+    end
+end
+
 local function RenderSortButton()
     sortButton:SetText(GetDB().sortMode == "rate" and L.SORT_RATE or L.SORT_TOTAL)
 end
@@ -438,6 +452,10 @@ local function RenderResults(list)
     end
 end
 
+local function AtMaxLevel()
+    return UnitLevel("player") >= (GetMaxPlayerLevel and GetMaxPlayerLevel() or 60)
+end
+
 local function Refresh()
     if not frame or not frame:IsShown() then return end
     if InCombatLockdown() then
@@ -449,7 +467,7 @@ local function Refresh()
     RenderHeader()
     RenderFactionButton()
 
-    if UnitLevel("player") >= (GetMaxPlayerLevel and GetMaxPlayerLevel() or 60) then
+    if AtMaxLevel() then
         RenderResults({})
         SetStatus(L.MAX_LEVEL)
         return
@@ -465,6 +483,7 @@ local function Refresh()
         function(list)
             RenderHeader()
             RenderResults(list)
+            NotifyScan(list)
             local note
             if status == "nodb" then
                 note = L.NO_DB
@@ -487,6 +506,26 @@ local function ScheduleRefresh()
     C_Timer.After(REFRESH_DELAY, function()
         pendingRefresh = false
         Refresh()
+    end)
+end
+
+--- Scans while the window is closed. `soon` skips the minimum gap (level-up, new zone).
+local function BackgroundScan(soon)
+    if frame and frame:IsShown() then ScheduleRefresh() return end
+    if backgroundPending then return end
+    local wait = REFRESH_DELAY
+    if not soon then wait = math.max(wait, lastBackground + BACKGROUND_MIN_GAP - GetTime()) end
+    backgroundPending = true
+    C_Timer.After(wait, function()
+        backgroundPending = false
+        if frame and frame:IsShown() then return end -- the window's own scan notifies listeners
+        if InCombatLockdown() then backgroundAfterCombat = true return end
+        if Engine.IsScanning() or AtMaxLevel() then return end
+        lastBackground = GetTime()
+        Engine.StartScan(GetDB().factionMode, nil, function(list)
+            lastList = list
+            NotifyScan(list)
+        end)
     end)
 end
 
@@ -640,6 +679,20 @@ local function CreateMainFrame()
     sortButton:SetHeight(20)
     sortButton:SetPoint("TOPRIGHT", -14, -86)
 
+    -- Next-steps panel and session report (Coach.lua)
+    local sessionButton = CreateButton(frame, 96, L.BTN_SESSION, function()
+        if ns.Coach then ns.Coach.ToggleReport() end
+    end)
+    sessionButton:SetFrameLevel(frame:GetFrameLevel() + 5)
+    sessionButton:SetHeight(20)
+    sessionButton:SetPoint("RIGHT", sortButton, "LEFT", -4, 0)
+    local nextButton = CreateButton(frame, 96, L.BTN_NEXT, function()
+        if ns.Coach then ns.Coach.TogglePanel() end
+    end)
+    nextButton:SetFrameLevel(frame:GetFrameLevel() + 5)
+    nextButton:SetHeight(20)
+    nextButton:SetPoint("RIGHT", sessionButton, "LEFT", -4, 0)
+
     rows = {}
     for i = 1, ROW_COUNT do rows[i] = CreateRow(frame, i) end
 
@@ -724,6 +777,14 @@ ns.UI = {
     KillTimeText = KillTimeText,
     CalibrationText = CalibrationText,
     Rescan = function() ScheduleRefresh() end,
+    BackgroundScan = BackgroundScan,
+    OnScan = function(fn) scanListeners[#scanListeners + 1] = fn end,
+    SortZones = SortZones,
+    FormatDuration = FormatDuration,
+    CurrentZoneName = CurrentZoneName,
+    Hex = Hex,
+    IsWindowShown = function() return frame and frame:IsShown() or false end,
+    LastList = function() return lastList end,
     --- The best zones from the last scan, in the current sort order.
     GetTopZones = function(n)
         local sorted = SortZones(lastList or {}, GetDB().sortMode)
@@ -763,6 +824,18 @@ SlashCmdList.ZONEXPADVISOR = function(msg)
         ResetPosition()
         return
     end
+    if msg == "next" then
+        if ns.Coach then ns.Coach.TogglePanel() end
+        return
+    end
+    if msg == "session" or msg == "report" then
+        if ns.Coach then ns.Coach.ToggleReport() end
+        return
+    end
+    if msg == "session reset" then
+        if ns.Coach then ns.Coach.ResetSession() end
+        return
+    end
     if msg == "config" or msg == "settings" or msg == "options" then
         if ns.Settings then ns.Settings.Toggle() end
         return
@@ -799,6 +872,10 @@ events:SetScript("OnEvent", function(_, event, arg1)
         if refreshAfterCombat then
             refreshAfterCombat = false
             ScheduleRefresh()
+        end
+        if backgroundAfterCombat then
+            backgroundAfterCombat = false
+            BackgroundScan(true)
         end
     else
         ScheduleRefresh()

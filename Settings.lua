@@ -1,5 +1,5 @@
 -- Settings.lua
--- Settings window with three tabs: General, Kill time, About.
+-- Settings window with tabs: General, Guide, Kill time, Accuracy, About.
 -- Opened by right-clicking the minimap button, from the addon compartment, or /zxp config.
 
 local ADDON_NAME, ns = ...
@@ -16,10 +16,11 @@ local LINKS = {
 }
 
 local WIDTH, HEIGHT = 500, 500
-local TAB_KEYS = { "general", "killtime", "accuracy", "about" }
+local TAB_KEYS = { "general", "guide", "killtime", "accuracy", "about" }
+local TAB_WIDTH = 92
 
 local frame, tabs, pages, killStatus, killStats, soloCheck, modeButtons, minimapCheck
-local eliteCheck, restedStatus, calibrationStatus, languageButtons
+local eliteCheck, restedStatus, calibrationStatus, languageButtons, panelCheck, alertCheck
 
 local RELOAD_POPUP = "ZONEXPADVISOR_RELOAD_LANGUAGE"
 if StaticPopupDialogs then
@@ -166,7 +167,7 @@ local function BuildGeneral(page)
     local help = SectionTitle(page, L.SET_COMMANDS_TITLE, resetPos, -22)
     Paragraph(page, L.SET_COMMANDS, help)
 
-    local mouse = SectionTitle(page, L.SET_MOUSE_TITLE, help, -96)
+    local mouse = SectionTitle(page, L.SET_MOUSE_TITLE, help, -122)
     local mouseText = Paragraph(page, L.SET_MOUSE, mouse)
 
     -- Language: Auto / English / 한국어. Takes effect after a UI reload.
@@ -194,6 +195,42 @@ local function BuildGeneral(page)
         languageButtons[key] = rb
         previous = rb
     end
+end
+
+local function BuildGuide(page)
+    local title = SectionTitle(page, L.SET_PANEL_TITLE)
+    panelCheck = CheckBox(page, L.SET_PANEL_SHOW, function(checked)
+        if ns.Coach then ns.Coach.TogglePanel(checked) end
+    end)
+    panelCheck:SetPoint("TOPLEFT", title, "BOTTOMLEFT", -4, -8)
+    local panelText = Paragraph(page, L.SET_PANEL_DESC, panelCheck, -4)
+    panelText:SetPoint("TOPLEFT", panelCheck, "BOTTOMLEFT", 4, -4)
+
+    local alertTitle = SectionTitle(page, L.SET_ALERT_TITLE, panelText, -22)
+    alertCheck = CheckBox(page, L.SET_ALERT_SHOW, function(checked)
+        ns.UI.GetDB().moveAlert = checked
+        if checked then ns.UI.BackgroundScan(true) end
+    end)
+    alertCheck:SetPoint("TOPLEFT", alertTitle, "BOTTOMLEFT", -4, -8)
+    local alertText = Paragraph(page, L.SET_ALERT_DESC, alertCheck, -4)
+    alertText:SetPoint("TOPLEFT", alertCheck, "BOTTOMLEFT", 4, -4)
+
+    local reportTitle = SectionTitle(page, L.SET_REPORT_TITLE, alertText, -22)
+    local reportText = Paragraph(page, L.SET_REPORT_DESC, reportTitle)
+    local open = ns.UI.CreateButton(page, 170, L.SET_REPORT_OPEN, function()
+        if ns.Coach then ns.Coach.ToggleReport() end
+    end)
+    open:SetPoint("TOPLEFT", reportText, "BOTTOMLEFT", 0, -10)
+    local reset = ns.UI.CreateButton(page, 170, L.REPORT_RESET, function()
+        if ns.Coach then ns.Coach.ResetSession() end
+    end)
+    reset:SetPoint("LEFT", open, "RIGHT", 8, 0)
+end
+
+function Settings.RefreshGuide()
+    if not panelCheck then return end
+    panelCheck:SetChecked(ns.Coach and ns.Coach.IsPanelShown() or false)
+    alertCheck:SetChecked(ns.UI.GetDB().moveAlert ~= false)
 end
 
 local function RefreshKillTime()
@@ -363,6 +400,7 @@ local function SelectTab(key)
     ns.UI.GetDB().settingsTab = key
     if key == "killtime" then RefreshKillTime() end
     if key == "accuracy" then RefreshAccuracy() end
+    if key == "guide" then Settings.RefreshGuide() end
     if key == "general" and minimapCheck then
         local db = ns.UI.GetDB()
         minimapCheck:SetChecked(not (db.minimap and db.minimap.hide))
@@ -408,7 +446,7 @@ local function CreateSettingsFrame()
     tabs, pages = {}, {}
     local previous
     for _, key in ipairs(TAB_KEYS) do
-        local tab = UI.CreateButton(frame, 110, L["SET_TAB_" .. key:upper()], function() SelectTab(key) end)
+        local tab = UI.CreateButton(frame, TAB_WIDTH, L["SET_TAB_" .. key:upper()], function() SelectTab(key) end)
         if previous then
             tab:SetPoint("LEFT", previous, "RIGHT", 4, 0)
         else
@@ -427,6 +465,7 @@ local function CreateSettingsFrame()
     end
 
     BuildGeneral(pages.general)
+    BuildGuide(pages.guide)
     BuildKillTime(pages.killtime)
     BuildAccuracy(pages.accuracy)
     BuildAbout(pages.about)
