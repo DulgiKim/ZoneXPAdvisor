@@ -5,7 +5,8 @@
 -- The route is a precedence-constrained travelling-salesman tour (pickup before objectives
 -- before turn-in; a chained quest's pickup after its prerequisite's turn-in). It is built
 -- with a nearest-neighbour pass and then shortened with 2-opt and Or-opt moves that keep
--- every precedence rule intact.
+-- every precedence rule intact. Objectives outside the zone (other zones, planned dungeons)
+-- are grouped into trips done at the end, and trips not worth their travel are dropped.
 
 local ADDON_NAME, ns = ...
 
@@ -45,6 +46,11 @@ local OTHER_CONTINENT = 15 * 60 -- boat or zeppelin: waiting, sailing and travel
 -- Round trip to another zone for objectives that are not in the quest's zone, when the
 -- client can't tell where that zone is.
 local DEFAULT_AWAY_TRIP = 10 * 60
+-- A planned dungeon run for its quests: getting there, clearing to the targets, getting back.
+local DUNGEON_RUN = 30 * 60
+-- Trips are only judged against the zone's own work when there is at least this much of it
+-- (s); a hub such as a city mostly sends you elsewhere, so its trips are its content.
+local HOME_MIN_TIME = 20 * 60
 
 --- Seconds per kill of one NPC including downtime. Uses this character's measured pace
 --- (KillTimer.lua) once enough kills are recorded, adjusted for the mob's level and rank.
@@ -235,7 +241,7 @@ local function MergeCamps(nodes, sameQuestOnly)
             campOf[seed] = camp
             for _, other in ipairs(objectives) do
                 local o = nodes[other]
-                if not campOf[other] and (not sameQuestOnly or o.quest == s.quest)
+                if not campOf[other] and (not sameQuestOnly or o.quest == s.quest) and o.chain == s.chain
                     and Dist(o, { x = cx / total, y = cy / total }) <= CAMP_RADIUS then
                     camp[#camp + 1] = other
                     campOf[other] = camp
@@ -287,13 +293,98 @@ local function MergeCamps(nodes, sameQuestOnly)
     return merged
 end
 
+--- Prerequisite quest ids of a quest (group and single lists together).
+local function PreQuests(Q, questId)
+    local out = {}
+    -- Not ipairs over { group, single }: a nil group would end the loop before single.
+    local group, single = Q.preQuestGroup(questId), Q.preQuestSingle(questId)
+    if type(group) == "table" then for _, id in ipairs(group) do out[#out + 1] = id end end
+    if type(single) == "table" then for _, id in ipairs(single) do out[#out + 1] = id end end
+    return out
+end
+
+--- Quests in the zone that another zone quest needs turned in first.
+local function Prerequisites(zone, Q, dropped)
+    local needed = {}
+    for _, quest in ipairs(zone.quests) do
+        if not (dropped and dropped[quest.id]) then
+            for _, preId in ipairs(PreQuests(Q, quest.id)) do needed[preId] = true end
+        end
+    end
+    return needed
+end
+
+--- Zone quests that follow each quest: [preId] = { followUpId, ... } (non-dropped only).
+local function FollowUps(zone, Q, dropped)
+    local map = {}
+    for _, quest in ipairs(zone.quests) do
+        if not (dropped and dropped[quest.id]) then
+            for _, preId in ipairs(PreQuests(Q, quest.id)) do
+                map[preId] = map[preId] or {}
+                table.insert(map[preId], quest.id)
+            end
+        end
+    end
+    return map
+end
+
+--- Every zone quest that follows `root`, directly or further down the chain.
+local function ChainOf(root, followUps)
+    local out, seen, queue = {}, { [root] = true }, { root }
+    while #queue > 0 do
+        local id = table.remove(queue)
+        for _, next in ipairs(followUps[id] or {}) do
+            if not seen[next] then
+                seen[next] = true
+                out[#out + 1] = next
+                queue[#queue + 1] = next
+            end
+        end
+    end
+    return out
+end
+
+--- Follow-up quests ("chain") none of whose open prerequisites is planned in this zone: the
+--- prerequisite lives in another zone or was dropped, so the follow-up can't be picked up on
+--- this route. Adds them to `dropped` (repeating for longer chains); returns how many and XP.
+local function DropOrphanChains(zone, Q, dropped)
+    local present = {}
+    for _, q in ipairs(zone.quests) do present[q.id] = true end
+    local count, xp = 0, 0
+    local changed = true
+    while changed do
+        changed = false
+        for _, q in ipairs(zone.quests) do
+            if q.status == "chain" and not dropped[q.id] then
+                local reachable = false
+                for _, preId in ipairs(PreQuests(Q, q.id)) do
+                    if present[preId] and not dropped[preId] then reachable = true break end
+                end
+                if not reachable then
+                    dropped[q.id] = true
+                    count = count + 1
+                    xp = xp + (q.total or 0) * ns.Engine.QuestWeight(q.status)
+                    changed = true
+                end
+            end
+        end
+    end
+    return count, xp
+end
+
 --- Builds route nodes for every quest of a zone. Each node: x, y (yards), duration (s),
 --- preds (indices that must be visited first).
-local function BuildNodes(zone, ctx, data, width, height)
+--- Objectives outside the zone (mobs in another zone, or inside a planned dungeon) make a
+--- "trip": trips[questId] = { targets = { {target, area} }, fight = s, dungeon = name,
+--- key = group key, needed = bool, turnX, turnY }. Such a quest's turn-in is left out of the
+--- route and done after the trip at the end, unless another zone quest needs it first
+--- (needed): then it stays in the route and the trip is done on the way.
+--- `dropped` lists quests left out entirely (trips not worth it).
+local function BuildNodes(zone, ctx, data, width, height, dropped)
     local Q = data.Quest
     local nodes = {}
-    -- Objectives done in another zone: their fighting time and the zones you must travel to.
-    local away = { time = 0, quests = 0, areas = {} }
+    local trips = {}
+    local needed = Prerequisites(zone, Q, dropped)
     local turnInOf = {} -- questId -> node index
     local pickupOf = {}
 
@@ -309,60 +400,79 @@ local function BuildNodes(zone, ctx, data, width, height)
 
     for _, quest in ipairs(zone.quests) do
         local id = quest.id
-        local preds = {}
+        if not (dropped and dropped[id]) then
+            local preds = {}
 
-        -- Pickup
-        if quest.status ~= "active" and quest.status ~= "ready" then
-            local startedBy = Q.startedBy(id)
-            local x, y
-            if type(startedBy) == "table" then
-                x, y = FirstSpawn(data, "npc", startedBy[1], zone.zoneId)
-                if not x then x, y = FirstSpawn(data, "object", startedBy[2], zone.zoneId) end
-            end
-            if x then
-                local index = Add(x, y, TALK_TIME, {}, id, "pickup")
-                pickupOf[id] = index
-                preds = { index }
-            end
-        end
-
-        -- Objectives
-        local objectiveNodes = {}
-        local awayQuest = false
-        if quest.status ~= "ready" and type(quest.targets) == "table" then
-            for _, target in ipairs(quest.targets) do
-                local duration
-                if target.kind == "object" then
-                    duration = target.count * OBJECT_TIME
-                else
-                    duration = target.count * KillTime(data, ctx.playerLevel, target.id)
+            -- Pickup
+            if quest.status ~= "active" and quest.status ~= "ready" then
+                local startedBy = Q.startedBy(id)
+                local x, y
+                if type(startedBy) == "table" then
+                    x, y = FirstSpawn(data, "npc", startedBy[1], zone.zoneId)
+                    if not x then x, y = FirstSpawn(data, "object", startedBy[2], zone.zoneId) end
                 end
-                local points = SpawnsInZone(data, target.kind, target.id, zone.zoneId)
-                if points then
-                    local x, y = DensestCluster(points)
-                    objectiveNodes[#objectiveNodes + 1] = Add(x, y, duration, preds, id, "objective", target)
-                else
-                    -- The mobs live in another zone (e.g. a city quest sending you elsewhere):
-                    -- the fighting still takes time, plus a trip there and back.
-                    away.time = away.time + duration
-                    awayQuest = true
-                    local area = MainSpawnArea(data, target.kind, target.id)
-                    if area then away.areas[area] = true else away.unknown = true end
+                if x then
+                    local index = Add(x, y, TALK_TIME, {}, id, "pickup")
+                    pickupOf[id] = index
+                    preds = { index }
                 end
             end
-        end
-        if awayQuest then away.quests = away.quests + 1 end
 
-        -- Turn-in
-        local finishedBy = Q.finishedBy(id)
-        if type(finishedBy) == "table" then
-            local x, y = FirstSpawn(data, "npc", finishedBy[1], zone.zoneId)
-            if not x then x, y = FirstSpawn(data, "object", finishedBy[2], zone.zoneId) end
-            if x then
-                local turnPreds = {}
-                for _, p in ipairs(preds) do turnPreds[#turnPreds + 1] = p end
-                for _, o in ipairs(objectiveNodes) do turnPreds[#turnPreds + 1] = o end
-                turnInOf[id] = Add(x, y, TALK_TIME, turnPreds, id, "turnin")
+            -- Objectives
+            local objectiveNodes = {}
+            local trip
+            if quest.status ~= "ready" and type(quest.targets) == "table" then
+                for _, target in ipairs(quest.targets) do
+                    local duration
+                    if target.kind == "object" then
+                        duration = target.count * OBJECT_TIME
+                    else
+                        duration = target.count * KillTime(data, ctx.playerLevel, target.id)
+                    end
+                    local points = not quest.dungeon and SpawnsInZone(data, target.kind, target.id, zone.zoneId)
+                    if points then
+                        local x, y = DensestCluster(points)
+                        objectiveNodes[#objectiveNodes + 1] = Add(x, y, duration, preds, id, "objective", target)
+                    else
+                        -- Done elsewhere: another zone (e.g. a city quest sending you out) or a
+                        -- dungeon. The fighting still takes time, plus getting there and back.
+                        trip = trip or { targets = {}, fight = 0, dungeon = quest.dungeon, needed = needed[id] }
+                        trip.fight = trip.fight + duration
+                        local area = not quest.dungeon and MainSpawnArea(data, target.kind, target.id) or nil
+                        trip.targets[#trip.targets + 1] = { target = target, area = area }
+                    end
+                end
+            end
+            if trip then
+                trips[id] = trip
+                if trip.dungeon then
+                    trip.key = "dungeon:" .. trip.dungeon
+                else
+                    local areas, seen = {}, {}
+                    for _, t in ipairs(trip.targets) do
+                        local a = t.area or "?"
+                        if not seen[a] then seen[a] = true areas[#areas + 1] = tostring(a) end
+                    end
+                    table.sort(areas)
+                    trip.key = "away:" .. table.concat(areas, ",")
+                end
+            end
+
+            -- Turn-in
+            local finishedBy = Q.finishedBy(id)
+            if type(finishedBy) == "table" then
+                local x, y = FirstSpawn(data, "npc", finishedBy[1], zone.zoneId)
+                if not x then x, y = FirstSpawn(data, "object", finishedBy[2], zone.zoneId) end
+                if x then
+                    if trip and not trip.needed then
+                        trip.turnX, trip.turnY = x, y -- turned in after the trip, at the end
+                    else
+                        local turnPreds = {}
+                        for _, p in ipairs(preds) do turnPreds[#turnPreds + 1] = p end
+                        for _, o in ipairs(objectiveNodes) do turnPreds[#turnPreds + 1] = o end
+                        turnInOf[id] = Add(x, y, TALK_TIME, turnPreds, id, "turnin")
+                    end
+                end
             end
         end
     end
@@ -386,11 +496,37 @@ local function BuildNodes(zone, ctx, data, width, height)
     -- Objectives inherit the pickup's chain predecessors transitively through the pickup,
     -- so no further edges are needed.
 
+    -- A trip quest that unlocks follow-ups here is turned in after the rest of the zone (the
+    -- trip happens at the end), and its follow-ups come after it: its turn-in waits for every
+    -- node outside such chains. Nodes of a chain are tagged so camps never mix chains.
+    local followUps = FollowUps(zone, Q, dropped)
+    local gates = {}
+    for id, trip in pairs(trips) do
+        if trip.needed and turnInOf[id] then
+            gates[turnInOf[id]] = true
+            for _, follower in ipairs(ChainOf(id, followUps)) do
+                for _, node in ipairs(nodes) do
+                    if node.quest == follower and not node.chain then node.chain = id end
+                end
+            end
+        end
+    end
+    for gate in pairs(gates) do
+        local preds, seen = nodes[gate].preds, {}
+        for _, p in ipairs(preds) do seen[p] = true end
+        for i, node in ipairs(nodes) do
+            if i ~= gate and not gates[i] and not node.chain and not seen[i] then
+                preds[#preds + 1] = i
+                seen[i] = true
+            end
+        end
+    end
+
     -- Mixed camps: merge nearby objectives. Merging objectives of different quests can create
     -- a cycle when one quest unlocks the other; then only same-quest objectives are merged.
     local merged = MergeCamps(nodes, false)
     if HasCycle(merged) and not HasCycle(nodes) then merged = MergeCamps(nodes, true) end
-    return merged, away
+    return merged, trips
 end
 
 ---------------------------------------------------------------------------------------------
@@ -604,43 +740,82 @@ local function ApproachTime(zone, ctx, data, hx, hy, width, height)
     return min(ground, flight)
 end
 
---- Time for objectives outside the zone: their fighting time plus a round trip to each other
---- zone involved (flight or running on the same continent, boat otherwise).
-local function AwayTime(away, zone, ctx, data)
-    if not away or away.quests == 0 then return 0 end
-    local total = away.time
+--- Round trip from the zone to another area: flight or running on the same continent, boat
+--- otherwise, a default when the client can't place it.
+local function RoundTrip(area, zone, ctx, data)
+    if area == nil then return DEFAULT_AWAY_TRIP end
     local zc, zx, zy = WorldPos(UiMapFor(zone.zoneId, data), 0.5, 0.5)
+    local ac, ax, ay = WorldPos(UiMapFor(area, data), 0.5, 0.5)
+    if not (zc and ac) then return DEFAULT_AWAY_TRIP end
+    if zc ~= ac then return 2 * OTHER_CONTINENT end
     local speed = ctx.playerLevel >= MOUNT_LEVEL and MOUNT_SPEED or RUN_SPEED
-    for area in pairs(away.areas) do
-        local trip = DEFAULT_AWAY_TRIP
-        local ac, ax, ay = WorldPos(UiMapFor(area, data), 0.5, 0.5)
-        if zc and ac then
-            if zc ~= ac then
-                trip = 2 * OTHER_CONTINENT
-            else
-                local d = sqrt((ax - zx) ^ 2 + (ay - zy) ^ 2)
-                trip = 2 * min(d * PATH_FACTOR / speed, FLIGHT_OVERHEAD + d * FLIGHT_PATH_FACTOR / FLIGHT_SPEED)
+    local d = sqrt((ax - zx) ^ 2 + (ay - zy) ^ 2)
+    return 2 * min(d * PATH_FACTOR / speed, FLIGHT_OVERHEAD + d * FLIGHT_PATH_FACTOR / FLIGHT_SPEED)
+end
+
+--- Trips grouped by destination (same set of other zones, or the same dungeon): one journey
+--- serves every quest of a group. Each group: key, dungeon, quests (ids), xp (weighted),
+--- time (s: fighting plus round trips, or a dungeon run), needed (some quest is a prerequisite).
+local function TripGroups(zone, trips, ctx, data)
+    local byKey, list = {}, {}
+    local questOf = {}
+    for _, q in ipairs(zone.quests) do questOf[q.id] = q end
+    for id, trip in pairs(trips) do
+        local g = byKey[trip.key]
+        if not g then
+            g = { key = trip.key, dungeon = trip.dungeon, quests = {}, xp = 0, fight = 0, areas = {} }
+            byKey[trip.key] = g
+            list[#list + 1] = g
+        end
+        g.quests[#g.quests + 1] = id
+        local q = questOf[id]
+        g.xp = g.xp + (q and (q.total or 0) * ns.Engine.QuestWeight(q.status) or 0)
+        g.fight = g.fight + trip.fight
+        if trip.needed then g.needed = true end
+        for _, t in ipairs(trip.targets) do g.areas[t.area or "?"] = true end
+    end
+    for _, g in ipairs(list) do
+        table.sort(g.quests)
+        if g.dungeon then
+            g.time = DUNGEON_RUN
+        else
+            g.time = g.fight
+            for area in pairs(g.areas) do
+                g.time = g.time + RoundTrip(area ~= "?" and area or nil, zone, ctx, data)
             end
         end
-        total = total + trip
     end
-    if away.unknown then total = total + DEFAULT_AWAY_TRIP end
-    return total
+    -- Away trips first (cheapest first), dungeons last.
+    table.sort(list, function(a, b)
+        if (a.dungeon ~= nil) ~= (b.dungeon ~= nil) then return b.dungeon ~= nil end
+        if a.time ~= b.time then return a.time < b.time end
+        return a.key < b.key
+    end)
+    return list
 end
 
 --- Quests in the order the route finishes them (last node of each quest), so the level-up
---- simulation hands out XP in the order it is earned. Quests without nodes go last.
-local function QuestsInRouteOrder(zone, nodes, order)
+--- simulation hands out XP in the order it is earned. Quests finished after a trip at the end
+--- follow, in trip order; dropped quests are left out.
+local function QuestsInRouteOrder(zone, nodes, order, trips, groups)
     local finish = {}
     for position, index in ipairs(order) do
         local id = nodes[index].quest
         if id then finish[id] = position end
     end
-    local list = {}
-    for i, q in ipairs(zone.quests) do list[i] = q end
     local fallback = #order + 1
+    for gi, g in ipairs(groups) do
+        for _, id in ipairs(g.quests) do
+            if not trips[id].needed then finish[id] = fallback + gi end
+        end
+    end
+    local list = {}
+    for _, q in ipairs(zone.quests) do
+        if not q.dropped then list[#list + 1] = q end
+    end
+    local last = fallback + #groups + 1
     table.sort(list, function(a, b)
-        local pa, pb = finish[a.id] or fallback, finish[b.id] or fallback
+        local pa, pb = finish[a.id] or last, finish[b.id] or last
         if pa ~= pb then return pa < pb end
         return a.id < b.id
     end)
@@ -648,14 +823,37 @@ local function QuestsInRouteOrder(zone, nodes, order)
 end
 
 --- The route as a list of steps for the next-steps panel (capped; the panel shows a few).
+--- Trips come last: one "away" or "dungeon" step per group naming every objective, then the
+--- turn-ins of those quests. A quest another one needs first keeps its trip step right before
+--- its own turn-in inside the route.
 local MAX_STEPS = 60
-local function RouteSteps(zone, nodes, order)
+local function RouteSteps(zone, nodes, order, trips, groups)
     local names = {}
     for _, q in ipairs(zone.quests) do names[q.id] = q.name end
     local steps = {}
+
+    local function TripStep(questIds, dungeon)
+        local step = { kind = dungeon and "dungeon" or "away", dungeon = dungeon, members = {} }
+        for _, id in ipairs(questIds) do
+            step.quest = step.quest or id
+            step.name = step.name or names[id]
+            for _, t in ipairs(trips[id].targets) do
+                step.members[#step.members + 1] = {
+                    quest = id, name = names[id], area = t.area,
+                    targetKind = t.target.kind, targetId = t.target.id, count = t.target.count,
+                }
+            end
+        end
+        if #step.members > 0 then steps[#steps + 1] = step end
+    end
+
     for _, index in ipairs(order) do
+        if #steps >= MAX_STEPS then break end
         local node = nodes[index]
         if node.kind then
+            if node.kind == "turnin" and trips[node.quest] then
+                TripStep({ node.quest }, trips[node.quest].dungeon)
+            end
             local target = node.target
             local step = {
                 kind = node.kind, quest = node.quest, name = names[node.quest],
@@ -675,7 +873,22 @@ local function RouteSteps(zone, nodes, order)
                 end
             end
             steps[#steps + 1] = step
-            if #steps >= MAX_STEPS then break end
+        end
+    end
+
+    for _, g in ipairs(groups) do
+        local later = {}
+        for _, id in ipairs(g.quests) do
+            if not trips[id].needed then later[#later + 1] = id end
+        end
+        if #later > 0 then
+            TripStep(later, g.dungeon)
+            for _, id in ipairs(later) do
+                local trip = trips[id]
+                if trip.turnX then
+                    steps[#steps + 1] = { kind = "turnin", quest = id, name = names[id], x = trip.turnX, y = trip.turnY }
+                end
+            end
         end
     end
     return steps
@@ -707,16 +920,8 @@ local function StartPoint(nodes, zone, width, height)
     return bx, by
 end
 
---- Plans a zone's route and stores routeTime (s), routeDistance (yards), travelTime,
---- actionTime and xpPerHour on the zone. `yield` lets the caller spread work over frames.
-function Route.Compute(zone, ctx, yield)
-    local data = ns.Engine.GetData()
-    if not data.Quest or type(zone.zoneId) ~= "number" then return end
-
-    local width, height = ZoneSize(zone.zoneId, data)
-    local nodes, away = BuildNodes(zone, ctx, data, width, height)
-    if #nodes == 0 then return end
-
+--- Plans the in-zone route: returns order, start, distance (yards) and action time (s).
+local function PlanRoute(nodes, zone, width, height, yield)
     local sx, sy = StartPoint(nodes, zone, width, height)
     local start = { x = sx, y = sy }
     local order = NearestNeighbour(nodes, sx, sy)
@@ -734,30 +939,137 @@ function Route.Compute(zone, ctx, yield)
         actions = actions + node.duration
         cur = node
     end
+    return order, sx, sy, distance, actions
+end
 
+--- Plans a zone's route and stores routeTime (s), routeDistance (yards), travelTime,
+--- actionTime and xpPerHour on the zone. `yield` lets the caller spread work over frames.
+---
+--- Trips out of the zone are judged per destination: a trip whose XP per hour (its quests'
+--- XP over fighting plus the journey) is below the rest of the zone's rate is not worth it,
+--- so those quests are dropped (shown in the tooltip). Planned dungeons are always kept, and
+--- so are quests another zone quest needs first, and every trip of a zone with little work
+--- of its own (a city hub).
+function Route.Compute(zone, ctx, yield)
+    local data = ns.Engine.GetData()
+    if not data.Quest or type(zone.zoneId) ~= "number" then return end
+
+    local width, height = ZoneSize(zone.zoneId, data)
+    -- Follow-ups whose prerequisite is not planned here can't be picked up on this route.
+    local dropped = {}
+    local chainCount, chainXP = DropOrphanChains(zone, data.Quest, dropped)
+    local nodes, trips = BuildNodes(zone, ctx, data, width, height, dropped)
+    local groups = TripGroups(zone, trips, ctx, data)
     local speed = ctx.playerLevel >= MOUNT_LEVEL and MOUNT_SPEED or RUN_SPEED
+
+    local order, sx, sy, distance, actions = {}, nil, nil, 0, 0
+    if #nodes > 0 then order, sx, sy, distance, actions = PlanRoute(nodes, zone, width, height, yield) end
+
+    -- XP per hour of the work inside the zone, the bar a trip has to clear.
+    local homeXP = 0
+    for _, q in ipairs(zone.quests) do
+        if not trips[q.id] and not dropped[q.id] then homeXP = homeXP + (q.total or 0) * ns.Engine.QuestWeight(q.status) end
+    end
+    local homeTime = distance * PATH_FACTOR / speed + actions
+    local homeRate = homeTime > 0 and homeXP / homeTime or 0
+
+    local questOf = {}
+    for _, q in ipairs(zone.quests) do questOf[q.id] = q end
+    local kept = {}
+    local droppedCount, droppedXP = 0, 0
+    for _, g in ipairs(groups) do
+        -- A trip that unlocks follow-ups is worth what the whole chain gives.
+        local xp = g.xp
+        if g.needed then
+            local followUps = FollowUps(zone, data.Quest, dropped)
+            local seen = {}
+            for _, root in ipairs(g.quests) do
+                for _, id in ipairs(ChainOf(root, followUps)) do
+                    if not seen[id] and questOf[id] then
+                        seen[id] = true
+                        xp = xp + (questOf[id].total or 0) * ns.Engine.QuestWeight(questOf[id].status)
+                    end
+                end
+            end
+        end
+        local rate = g.time > 0 and xp / g.time or math.huge
+        if g.dungeon or homeTime < HOME_MIN_TIME or rate >= homeRate then
+            kept[#kept + 1] = g
+        else
+            for _, id in ipairs(g.quests) do
+                dropped[id] = true
+                droppedCount = droppedCount + 1
+            end
+            droppedXP = droppedXP + g.xp
+        end
+    end
+    -- Dropping a trip can strand its follow-ups too.
+    local moreCount, moreXP = 0, 0
+    if droppedCount > 0 then moreCount, moreXP = DropOrphanChains(zone, data.Quest, dropped) end
+    chainCount, chainXP = chainCount + moreCount, chainXP + moreXP
+    for _, q in ipairs(zone.quests) do q.dropped = dropped[q.id] or nil end
+
+    if droppedCount + moreCount > 0 then
+        -- Plan again without the dropped quests (their pickups are no longer stops).
+        if yield then yield() end
+        nodes, trips = BuildNodes(zone, ctx, data, width, height, dropped)
+        order, sx, sy, distance, actions = {}, sx, sy, 0, 0
+        if #nodes > 0 then order, sx, sy, distance, actions = PlanRoute(nodes, zone, width, height, nil) end
+        -- Kept trips lose quests that were stranded by the drops (and the trip, if empty).
+        groups = {}
+        for _, g in ipairs(kept) do
+            local left = {}
+            for _, id in ipairs(g.quests) do if trips[id] then left[#left + 1] = id end end
+            if #left > 0 then
+                g.quests = left
+                groups[#groups + 1] = g
+            end
+        end
+    else
+        groups = kept
+    end
+    if #nodes == 0 and #groups == 0 then return end
+
     local travel = distance * PATH_FACTOR / speed
-    local okApproach, approach = pcall(ApproachTime, zone, ctx, data, sx, sy, width, height)
-    approach = okApproach and approach or nil
+    local approach
+    if sx then
+        local okApproach, value = pcall(ApproachTime, zone, ctx, data, sx, sy, width, height)
+        approach = okApproach and value or nil
+    end
+
+    local awayTime, awayQuests, dungeonTime = 0, 0, 0
+    for _, g in ipairs(groups) do
+        if g.dungeon then
+            dungeonTime = dungeonTime + g.time
+        else
+            awayTime = awayTime + g.time
+            awayQuests = awayQuests + #g.quests
+        end
+    end
 
     -- XP in the order the route earns it, levelling up on the way.
-    if ns.Engine.SimulateZone then ns.Engine.SimulateZone(zone, ctx, QuestsInRouteOrder(zone, nodes, order)) end
+    if ns.Engine.SimulateZone then
+        ns.Engine.SimulateZone(zone, ctx, QuestsInRouteOrder(zone, nodes, order, trips, groups))
+    end
 
     zone.routeDistance = distance
     zone.travelTime = travel
     zone.actionTime = actions
     zone.approachTime = approach
-    local okAway, awayTime = pcall(AwayTime, away, zone, ctx, data)
-    zone.awayTime = okAway and awayTime > 0 and awayTime or nil
-    zone.awayQuests = away and away.quests > 0 and away.quests or nil
-    zone.routeTime = travel + actions + (approach or 0) + (zone.awayTime or 0)
+    zone.awayTime = awayTime > 0 and awayTime or nil
+    zone.awayQuests = awayQuests > 0 and awayQuests or nil
+    zone.dungeonTime = dungeonTime > 0 and dungeonTime or nil
+    zone.awayDropped = droppedCount > 0 and droppedCount or nil
+    zone.awayDroppedXP = droppedCount > 0 and droppedXP or nil
+    zone.chainDropped = chainCount > 0 and chainCount or nil
+    zone.chainDroppedXP = chainCount > 0 and chainXP or nil
+    zone.routeTime = travel + actions + (approach or 0) + awayTime + dungeonTime
     zone.routeStops = #order
-    zone.routeSteps = RouteSteps(zone, nodes, order)
+    zone.routeSteps = RouteSteps(zone, nodes, order, trips, groups)
     zone.uiMapId = UiMapFor(zone.zoneId, data)
     zone.xpPerHour = zone.routeTime > 0 and zone.score / (zone.routeTime / 3600) or 0
 end
 
--- Exposed for tests.
 Route._NearestNeighbour = NearestNeighbour
 Route._TwoOpt = TwoOpt
 Route._OrOpt = OrOpt

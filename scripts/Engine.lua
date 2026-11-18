@@ -30,6 +30,9 @@ local WEIGHT = {
     soon = 0.5,
 }
 
+--- Share of a quest's XP that counts toward its zone (route planning uses it too).
+function Engine.QuestWeight(status) return WEIGHT[status] or 1 end
+
 ---------------------------------------------------------------------------------------------
 -- Data source
 ---------------------------------------------------------------------------------------------
@@ -166,34 +169,70 @@ local function GetCompletedQuests()
     return completed
 end
 
---- Returns [questId] = { title, level, complete } for every quest in the log.
+--- Returns [questId] = { title, level, complete, header } for every quest in the log.
+--- header is the log section the quest is listed under (a zone or a dungeon name).
 local function ReadQuestLog()
     local log = {}
     if C_QuestLog and C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetInfo then
         local numEntries = C_QuestLog.GetNumQuestLogEntries() or 0
+        local header
         for i = 1, numEntries do
             local info = C_QuestLog.GetInfo(i)
-            if info and not info.isHeader and info.questID and info.questID > 0 then
+            if info and info.isHeader then
+                header = info.title
+            elseif info and info.questID and info.questID > 0 then
                 local complete = C_QuestLog.IsComplete and C_QuestLog.IsComplete(info.questID)
                 local failed = C_QuestLog.IsFailed and C_QuestLog.IsFailed(info.questID)
                 if not failed then
                     log[info.questID] = {
                         title = info.title, level = info.level, complete = complete and true or false,
-                        suggestedGroup = info.suggestedGroup,
+                        suggestedGroup = info.suggestedGroup, header = header,
                     }
                 end
             end
         end
     elseif GetNumQuestLogEntries and GetQuestLogTitle then
         local numEntries = GetNumQuestLogEntries() or 0
+        local header
         for i = 1, numEntries do
             local title, level, _, isHeader, _, isComplete, _, questId = GetQuestLogTitle(i)
-            if not isHeader and questId and questId > 0 and isComplete ~= -1 then
-                log[questId] = { title = title, level = level, complete = isComplete == 1 }
+            if isHeader then
+                header = title
+            elseif questId and questId > 0 and isComplete ~= -1 then
+                log[questId] = { title = title, level = level, complete = isComplete == 1, header = header }
             end
         end
     end
     return log
+end
+
+---------------------------------------------------------------------------------------------
+-- Dungeon plan: dungeons the player means to run. Quests done inside a dungeon only count
+-- (and only show up in the next-steps panel) for planned dungeons. Saved per character.
+---------------------------------------------------------------------------------------------
+
+local function CharKey()
+    return (UnitName and UnitName("player") or "?") .. "-" .. (GetRealmName and GetRealmName() or "?")
+end
+
+local function DungeonPlan(create)
+    local db = ZoneXPAdvisorDB
+    if not db then return nil end
+    if create then
+        db.dungeonPlan = db.dungeonPlan or {}
+        db.dungeonPlan[CharKey()] = db.dungeonPlan[CharKey()] or {}
+    end
+    return db.dungeonPlan and db.dungeonPlan[CharKey()]
+end
+
+function Engine.IsDungeonPlanned(name)
+    local plan = DungeonPlan(false)
+    return plan and plan[name] and true or false
+end
+
+function Engine.SetDungeonPlanned(name, planned)
+    local plan = DungeonPlan(true)
+    if plan then plan[name] = planned and true or nil end
 end
 
 --- Faction the scan is evaluated for: "Alliance" or "Horde".
@@ -565,7 +604,9 @@ local function NewZone(zoneId)
         inLog = 0,
         restedXP = 0,  -- extra kill XP from the rested pool, filled by FinishZones
         eliteSkipped = 0,   -- elite / group quests left out of the score (solo play)
+        rep = {},      -- factionId -> reputation from the counted quests (weighted like XP)
         eliteSkippedXP = 0,
+        dungeonSkipped = {}, -- dungeon name -> { count, xp } of quests in dungeons not planned
         hunt = 0,      -- hunting-ground potential (spawns x kill XP), filled after the quest pass
         minLevel = nil,
         maxLevel = nil,
@@ -582,7 +623,7 @@ local function GetZone(zones, zoneId)
     return zone
 end
 
-local function AddToZone(zones, zoneId, questId, name, questLevel, xp, status, mobXP, kills, targets, elite)
+local function AddToZone(zones, zoneId, questId, name, questLevel, xp, status, mobXP, kills, targets, elite, dungeon)
     local zone = GetZone(zones, zoneId)
     mobXP, kills = mobXP or 0, kills or 0
     local weight = WEIGHT[status] or 1
@@ -599,7 +640,18 @@ local function AddToZone(zones, zoneId, questId, name, questLevel, xp, status, m
     zone.quests[#zone.quests + 1] = {
         id = questId, name = name, level = questLevel, status = status,
         xp = xp, baseXP = xp, mobXP = mobXP, kills = kills, total = xp + mobXP, targets = targets, elite = elite,
+        dungeon = dungeon, -- name of the (planned) dungeon its objectives are done in
     }
+    -- Reputation rewards: { {factionId, amount}, ... } in QuestieDB.
+    local rewards = QuestDB and QuestDB.reputationReward and QuestDB.reputationReward(questId)
+    if type(rewards) == "table" then
+        for _, r in ipairs(rewards) do
+            local faction, amount = r[1], r[2]
+            if type(faction) == "number" and type(amount) == "number" and amount ~= 0 then
+                zone.rep[faction] = (zone.rep[faction] or 0) + amount * weight
+            end
+        end
+    end
 end
 
 --- Builds the scan context shared by every quest evaluation.
@@ -740,6 +792,57 @@ EvaluateQuest = function(ctx, questId, depth)
     return status
 end
 
+-- Quest tags (C_QuestLog.GetQuestTagInfo tagID): 1 elite (group), 62/88/89 raid, 81 dungeon.
+local ELITE_TAG = 1
+local INSTANCE_TAGS = { [62] = true, [81] = true, [88] = true, [89] = true }
+
+local function QuestTag(questId)
+    if C_QuestLog and C_QuestLog.GetQuestTagInfo then
+        local ok, info = pcall(C_QuestLog.GetQuestTagInfo, questId)
+        return ok and type(info) == "table" and info.tagID or nil
+    elseif GetQuestTagInfo then
+        local ok, id = pcall(GetQuestTagInfo, questId)
+        return ok and id or nil
+    end
+end
+
+--- The instance area all objective targets live in, when every target only spawns inside
+--- instances (the first such area), or nil.
+local function TargetsInstanceArea(targets)
+    if type(targets) ~= "table" or #targets == 0 then return nil end
+    local found
+    for _, t in ipairs(targets) do
+        local source = t.kind == "object" and ObjectDB or NpcDB
+        local spawns = source and source.spawns and source.spawns(t.id)
+        if type(spawns) ~= "table" then return nil end
+        local any = false
+        for areaId, coords in pairs(spawns) do
+            if type(coords) == "table" and #coords > 0 then
+                if not dungeonAreas[areaId] then return nil end
+                any = true
+                found = found or areaId
+            end
+        end
+        if not any then return nil end
+    end
+    return found
+end
+
+--- Name of the dungeon a quest is done in, or nil when it is not a dungeon / raid quest.
+--- Tagged quests ("(Dungeon)" in the log) or quests whose mobs only live inside instances.
+--- The name comes from the quest log section (the game knows new dungeons that QuestieDB
+--- may not), else from the quest's or the mobs' instance area.
+local function DungeonOf(questId, logEntry, zoneOrSort, targets, zoneName)
+    local tagged = INSTANCE_TAGS[QuestTag(questId) or 0]
+    local area = TargetsInstanceArea(targets)
+    if not tagged and not area then return nil end
+    if logEntry and logEntry.header and logEntry.header ~= zoneName then return logEntry.header end
+    local id = (type(zoneOrSort) == "number" and dungeonAreas[zoneOrSort] and zoneOrSort) or area
+    local name = id and C_Map and C_Map.GetAreaInfo and C_Map.GetAreaInfo(id)
+    if type(name) == "string" and name ~= "" then return name end
+    return ns.L.DUNGEON_UNKNOWN
+end
+
 --- Adds one quest to the zone table, if it counts.
 local function ScoreQuest(ctx, zones, questId)
     local logEntry = ctx.log[questId]
@@ -764,22 +867,39 @@ local function ScoreQuest(ctx, zones, questId)
     if fromDB then xp = floor(xp * questFactor + 0.5) end
 
     local mobXP, kills, targets, elite = 0, 0, nil, false
+    local dungeon
     if status ~= "ready" then
         mobXP, kills, targets, elite = ObjectiveMobXP(questId, ctx.playerLevel, logEntry ~= nil)
-        if logEntry and (logEntry.suggestedGroup or 0) > 1 then elite = true end
-        -- Elite / group quests need a party; solo players skip them unless they opt in.
-        -- Quests that only need turning in are always counted.
-        if elite and not ctx.countElite then
-            local z = GetZone(zones, zone)
-            z.eliteSkipped = z.eliteSkipped + 1
-            z.eliteSkippedXP = z.eliteSkippedXP + xp + mobXP
-            return
+        local zoneName = C_Map and C_Map.GetAreaInfo and C_Map.GetAreaInfo(zone)
+        dungeon = DungeonOf(questId, logEntry, zoneOrSort, targets, zoneName)
+        if dungeon then
+            -- Dungeon quests count only for dungeons the player plans to run (group or not).
+            if not Engine.IsDungeonPlanned(dungeon) then
+                local z = GetZone(zones, zone)
+                local entry = z.dungeonSkipped[dungeon] or { count = 0, xp = 0 }
+                z.dungeonSkipped[dungeon] = entry
+                entry.count = entry.count + 1
+                entry.xp = entry.xp + xp + mobXP
+                return
+            end
+            elite = false
+        else
+            if logEntry and (logEntry.suggestedGroup or 0) > 1 then elite = true end
+            if QuestTag(questId) == ELITE_TAG then elite = true end
+            -- Elite / group quests need a party; solo players skip them unless they opt in.
+            -- Quests that only need turning in are always counted.
+            if elite and not ctx.countElite then
+                local z = GetZone(zones, zone)
+                z.eliteSkipped = z.eliteSkipped + 1
+                z.eliteSkippedXP = z.eliteSkippedXP + xp + mobXP
+                return
+            end
         end
     end
 
     local name = (logEntry and logEntry.title) or QuestDB.name(questId) or ("#" .. questId)
     local questLevel = QuestDB.questLevel(questId) or (logEntry and logEntry.level)
-    AddToZone(zones, zone, questId, name, questLevel, xp, status, mobXP, kills, targets, elite)
+    AddToZone(zones, zone, questId, name, questLevel, xp, status, mobXP, kills, targets, elite, dungeon)
 end
 
 --- Adds one NPC's spawns to the hunting-ground totals if it is a good solo target.

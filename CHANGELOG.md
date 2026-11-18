@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.0
+
+### English
+- Trips to other zones: quests whose mobs live elsewhere are grouped by destination and judged as one trip (their XP over fighting plus the round trip). A trip slower than the rest of the zone is left out of the score and the route, and the tooltip says how many quests were skipped and why ("not worth the trip"). Trips worth taking are done at the end of the zone, one journey per destination, with their turn-ins after it. Hubs with little work of their own, such as cities, keep all their trips.
+- Follow-up quests: a follow-up whose earlier quest is not done in this zone (it lives elsewhere, is grey or elite, or was skipped as not worth the trip) can't be picked up on this route, so it is left out too and listed in the tooltip. A trip that unlocks follow-ups is judged by what the whole chain gives; if kept, the trip still happens at the end of the zone and the follow-ups come after it. Before, such a follow-up showed up as "Pick up" right away.
+- Next-steps panel: a trip shows as one step naming the mobs and the zone to go to (e.g. "Kill Mob x8 | Other zone: Westfall"), instead of "Pick up" and "Turn in" back to back with nothing in between.
+- Dungeon plan: quests done inside a dungeon (tagged "(Dungeon)" in the quest log, or whose mobs only live in instances) count only for dungeons you plan to run. Ctrl+click a zone in the list to plan or unplan its dungeons; the tooltip lists each dungeon with its quests and XP. A planned dungeon adds one "Dungeon: name" step (about 30 minutes) followed by its turn-ins. Dungeon names come from the quest log, so new WoW Forever dungeons work too. Saved per character.
+- Reputation estimate: the zone tooltip lists the reputation its quests give or take per faction (largest first, losses in red), weighted like XP. Humans get +10% (Diplomacy). Kill reputation is not included, and the ranking is unchanged.
+- Files: the Lua files moved into a `scripts` folder. Delete the old ZoneXPAdvisor folder before extracting if you update by hand, and restart the game (a /reload is not enough for new files).
+
+### 한국어
+- 다른 지역 이동: 잡을 몬스터가 다른 지역에 있는 퀘스트를 목적지별로 묶어서 한 번의 이동으로 계산합니다(경험치 ÷ 전투 시간과 왕복 시간). 지역의 나머지 퀘스트보다 시간당 효율이 낮은 이동은 점수와 동선에서 빼고, 툴팁에 몇 개를 왜 뺐는지("이동할 가치가 없어") 보여 줍니다. 할 만한 이동은 지역 동선 맨 끝에 목적지마다 한 번씩 다녀오고, 그 뒤에 보고합니다. 도시처럼 자체 퀘스트가 적은 거점은 이동을 모두 유지합니다.
+- 연계 퀘스트: 앞 퀘스트를 이 지역에서 하지 않는 연계 퀘스트(앞 퀘스트가 다른 지역이거나, 회색·정예이거나, 이동할 가치가 없어 빠진 경우)는 이 동선에서 받을 수 없으므로 같이 빼고 툴팁에 표시합니다. 연계 퀘스트를 여는 이동은 연계 전체의 경험치로 판단하고, 유지할 때도 이동은 지역 동선 끝에 하고 연계 퀘스트는 그 뒤에 합니다. 전에는 이런 연계 퀘스트가 바로 "받기"로 나왔습니다.
+- 다음 할 일 패널: 다른 지역 이동은 몬스터와 가야 할 지역을 알려 주는 한 단계로 보여 줍니다(예: "몬스터 x8 처치 | 다른 지역: 서부 몰락지대"). 전에는 그 사이 없이 "받기" 다음 바로 "보고"가 나왔습니다.
+- 던전 계획: 던전 안에서 하는 퀘스트(퀘스트 목록에 "(던전)" 표시이거나 몬스터가 인스턴스 안에만 있는 퀘스트)는 방문하기로 정한 던전만 계산합니다. 목록에서 지역을 Ctrl+클릭하면 그 지역 던전을 방문 예정으로 바꾸거나 취소하고, 툴팁에 던전별 퀘스트 수와 경험치가 나옵니다. 방문 예정인 던전은 "던전: 이름" 단계 하나(약 30분)와 그 뒤의 보고 단계로 나옵니다. 던전 이름은 퀘스트 목록에서 가져오므로 WoW Forever 신규 던전도 됩니다. 캐릭터별로 저장합니다.
+- 평판 예상: 지역 툴팁에 그 지역 퀘스트로 얻거나 잃는 평판을 진영별로 보여 줍니다(변화가 큰 순서, 잃는 평판은 빨간색). 경험치와 같은 가중치를 쓰고, 인간은 외교 특성으로 +10%를 더합니다. 몬스터 처치 평판은 포함하지 않으며 순위 계산은 바뀌지 않습니다.
+- 파일 구성: Lua 파일을 `scripts` 폴더로 옮겼습니다. 직접 설치한다면 기존 ZoneXPAdvisor 폴더를 지우고 압축을 풀고, 게임을 다시 시작하세요(새 파일은 /reload로 읽히지 않습니다).
+
 ## 1.0.2
 
 ### English

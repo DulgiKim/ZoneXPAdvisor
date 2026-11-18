@@ -270,6 +270,93 @@ local HUNT_COLOR = {
     poor = { 0.6, 0.6, 0.6 },
 }
 
+local REP_LINES = 4
+
+--- Faction name, and whether it is a group header without its own reputation
+--- (e.g. "Alliance" or "Steamwheedle Cartel"), which the tooltip leaves out.
+local function FactionInfo(factionId)
+    if GetFactionInfoByID then
+        local ok, name, _, _, _, _, _, _, _, isHeader, _, hasRep = pcall(GetFactionInfoByID, factionId)
+        if ok and type(name) == "string" and name ~= "" then return name, isHeader and not hasRep end
+    end
+    if C_Reputation and C_Reputation.GetFactionDataByID then
+        local ok, data = pcall(C_Reputation.GetFactionDataByID, factionId)
+        if ok and type(data) == "table" and data.name then
+            return data.name, data.isHeader and not data.isHeaderWithRep
+        end
+    end
+    return "#" .. tostring(factionId), false
+end
+
+--- "Reputation (estimate)" with the factions the zone's quests change, largest first
+--- (losses in red). Humans gain 10% more reputation (Diplomacy).
+local function AddReputationLines(zone)
+    if not zone.rep then return end
+    local bonus = select(2, UnitRace("player")) == "Human" and 1.1 or 1
+    local list = {}
+    for faction, amount in pairs(zone.rep) do
+        local name, header = FactionInfo(faction)
+        if not header and math.abs(amount) >= 1 then
+            list[#list + 1] = { name, amount > 0 and amount * bonus or amount }
+        end
+    end
+    if not list[1] then return end
+    table.sort(list, function(a, b) return math.abs(a[2]) > math.abs(b[2]) end)
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(L.TT_REP, C.gold[1], C.gold[2], C.gold[3])
+    for i = 1, math.min(REP_LINES, #list) do
+        local amount = list[i][2]
+        local r, g, b = 0.4, 0.8, 1
+        if amount < 0 then r, g, b = 1, 0.35, 0.3 end
+        GameTooltip:AddDoubleLine("  " .. list[i][1], (amount > 0 and "+" or "-") .. FormatNumber(math.abs(amount)),
+            0.8, 0.8, 0.8, r, g, b)
+    end
+    if #list > REP_LINES then GameTooltip:AddLine(string.format(L.TT_MORE, #list - REP_LINES), 0.6, 0.6, 0.6) end
+end
+
+--- Dungeons with quests in a zone: name -> { count, xp, planned }.
+local function ZoneDungeons(zone)
+    local list = {}
+    for name, entry in pairs(zone.dungeonSkipped or {}) do
+        list[name] = { count = entry.count, xp = entry.xp, planned = false }
+    end
+    for _, quest in ipairs(zone.quests or {}) do
+        if quest.dungeon then
+            local entry = list[quest.dungeon] or { count = 0, xp = 0, planned = true }
+            list[quest.dungeon] = entry
+            entry.count = entry.count + 1
+            entry.xp = entry.xp + (quest.total or 0)
+        end
+    end
+    return list
+end
+
+local function AddDungeonLines(zone)
+    local any = false
+    for name, entry in pairs(ZoneDungeons(zone)) do
+        any = true
+        local state = entry.planned and L.TT_DUNGEON_PLANNED or L.TT_DUNGEON_SKIPPED
+        local color = entry.planned and { 0.3, 1, 0.3 } or C.muted
+        GameTooltip:AddDoubleLine(string.format(L.TT_DUNGEON, name, entry.count, FormatNumber(entry.xp)), state,
+            0.8, 0.8, 0.8, color[1], color[2], color[3])
+    end
+    if any then GameTooltip:AddLine(L.TT_DUNGEON_HINT, 0.5, 0.5, 0.5, true) end
+end
+
+--- Ctrl+click on a zone: plan all its dungeons, or unplan them when all are planned already.
+local function ToggleZoneDungeons(zone)
+    local names, allPlanned = {}, true
+    for name, entry in pairs(ZoneDungeons(zone)) do
+        names[#names + 1] = name
+        if not entry.planned then allPlanned = false end
+    end
+    if #names == 0 then return false end
+    table.sort(names)
+    for _, name in ipairs(names) do Engine.SetDungeonPlanned(name, not allPlanned) end
+    Print(string.format(allPlanned and L.DUNGEON_UNPLANNED_MSG or L.DUNGEON_PLANNED_MSG, table.concat(names, ", ")))
+    return true
+end
+
 local function ShowZoneTooltip(row)
     local zone = row.zone
     if not zone then return end
@@ -290,6 +377,7 @@ local function ShowZoneTooltip(row)
                 local levelText = quest.level and quest.level > 0 and quest.level or "?"
                 local left = string.format("%s[%s]|r %s", Hex(lc), levelText, quest.name)
                 if quest.elite then left = left .. " |cffff6040" .. L.TT_ELITE_TAG .. "|r" end
+                if quest.dropped then left = left .. " |cff999999" .. L.TT_DROPPED_TAG .. "|r" end
                 local right = FormatNumber(quest.xp) .. " XP"
                 if (quest.mobXP or 0) > 0 then
                     right = right .. Hex(C.muted) .. string.format(L.TT_QUEST_MOB, FormatNumber(quest.mobXP)) .. "|r"
@@ -321,6 +409,15 @@ local function ShowZoneTooltip(row)
         GameTooltip:AddLine(string.format(L.TT_ELITE_SKIPPED, zone.eliteSkipped, FormatNumber(zone.eliteSkippedXP or 0)),
             0.6, 0.6, 0.6, true)
     end
+    if zone.awayDropped then
+        GameTooltip:AddLine(string.format(L.TT_AWAY_DROPPED, zone.awayDropped, FormatNumber(zone.awayDroppedXP or 0)),
+            0.6, 0.6, 0.6, true)
+    end
+    if zone.chainDropped then
+        GameTooltip:AddLine(string.format(L.TT_CHAIN_DROPPED, zone.chainDropped, FormatNumber(zone.chainDroppedXP or 0)),
+            0.6, 0.6, 0.6, true)
+    end
+    AddDungeonLines(zone)
 
     if zone.routeTime then
         GameTooltip:AddLine(" ")
@@ -338,6 +435,9 @@ local function ShowZoneTooltip(row)
             GameTooltip:AddDoubleLine(string.format(L.TT_ROUTE_AWAY, zone.awayQuests or 0), FormatDuration(zone.awayTime),
                 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
         end
+        if zone.dungeonTime then
+            GameTooltip:AddDoubleLine(L.TT_ROUTE_DUNGEON, FormatDuration(zone.dungeonTime), 0.8, 0.8, 0.8, 0.8, 0.8, 0.8)
+        end
         GameTooltip:AddDoubleLine(L.TT_RATE, FormatNumber(zone.xpPerHour) .. " XP", 0.3, 1, 0.3, 0.3, 1, 0.3)
         GameTooltip:AddLine(KillTimeText(), 0.6, 0.85, 1, true)
     end
@@ -348,6 +448,8 @@ local function ShowZoneTooltip(row)
         GameTooltip:AddDoubleLine(L.TT_HUNT, L["HUNT_" .. zone.huntRating:upper()], C.gold[1], C.gold[2], C.gold[3], color[1], color[2], color[3])
         GameTooltip:AddLine(string.format(L.TT_HUNT_DETAIL, zone.huntSpawns or 0), 0.7, 0.7, 0.7, true)
     end
+
+    AddReputationLines(zone)
 
     GameTooltip:AddLine(" ")
     local calibration = CalibrationText()
@@ -637,6 +739,12 @@ local function CreateRow(parent, index)
     row.time:SetTextColor(0.8, 0.9, 1)
 
     row:SetScript("OnEnter", ShowZoneTooltip)
+    row:SetScript("OnClick", function(self)
+        if self.zone and IsControlKeyDown and IsControlKeyDown() and ToggleZoneDungeons(self.zone) then
+            GameTooltip:Hide()
+            Refresh()
+        end
+    end)
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
     row:Hide()
     return row

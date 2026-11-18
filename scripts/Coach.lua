@@ -131,6 +131,21 @@ local function StepText(step)
         main = string.format(fmt, TargetName(step.targetKind, step.targetId), count)
     end
     local sub = step.kind == "objective" and quest or ""
+    if step.kind == "dungeon" then
+        sub = string.format(L.STEP_DUNGEON, step.dungeon or L.DUNGEON_UNKNOWN) .. "  ·  " .. quest
+    elseif step.kind == "away" then
+        -- Objectives in other zones: name the zones instead of coordinates.
+        local areas, seen = {}, {}
+        for _, m in ipairs(OpenMembers(step)) do
+            local area = m.area and C_Map and C_Map.GetAreaInfo and Call(C_Map.GetAreaInfo, m.area)
+            if type(area) == "string" and not seen[area] then
+                seen[area] = true
+                areas[#areas + 1] = area
+            end
+        end
+        local where = #areas > 0 and table.concat(areas, ", ") or L.STEP_AWAY_UNKNOWN
+        sub = string.format(L.STEP_AWAY, where) .. "  ·  " .. quest
+    end
     if step.x and step.y then
         local coords = string.format("%.0f, %.0f", step.x, step.y)
         sub = sub ~= "" and (sub .. "  ·  " .. coords) or coords
@@ -221,7 +236,7 @@ local function RenderPanel()
                 row.main:SetText(main)
                 row.sub:SetText(sub)
                 local icon = STEP_ICON[step.kind]
-                if step.kind == "objective" then
+                if step.kind == "objective" or step.kind == "away" or step.kind == "dungeon" then
                     local kind = step.targetKind
                     if step.members then kind = select(3, CampText(step)) and "npc" or "object" end
                     icon = STEP_ICON[kind] or STEP_ICON.npc
@@ -325,7 +340,7 @@ local function CreatePanel()
         if row.sub.SetWordWrap then row.sub:SetWordWrap(false) end
         row:SetScript("OnClick", function(self)
             local step = self.step
-            if not step then return end
+            if not step or not step.x then return end -- away steps have no spot in this zone
             local where = step.x and string.format("%.1f, %.1f", step.x, step.y) or "?"
             if SetWaypoint(step, self.uiMapId, self.title) then
                 U.Print(string.format(L.WAYPOINT_SET, self.title, where))
