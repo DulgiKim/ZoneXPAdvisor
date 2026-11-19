@@ -134,7 +134,7 @@ function Engine.HasXPData() return questXP ~= nil end
 
 --- Shared handles for Route.lua.
 function Engine.GetData()
-    return { DB = DB, Quest = QuestDB, Npc = NpcDB, Object = ObjectDB, zoneModule = zoneModule }
+    return { DB = DB, Quest = QuestDB, Npc = NpcDB, Object = ObjectDB, Item = ItemDB, zoneModule = zoneModule }
 end
 
 ---------------------------------------------------------------------------------------------
@@ -407,7 +407,8 @@ local function LogCounts(questId)
     return byType
 end
 
---- Kills needed to loot `count` of an item, and the XP of those kills.
+--- Kills needed to loot `count` of an item, the XP of those kills, the mob chosen, whether it
+--- is elite and its drop rate in percent.
 local function ItemObjectiveXP(itemId, count, playerLevel)
     if count <= 0 or not ItemDB then return 0, 0 end
     local npcs = ItemDB.npcDrops(itemId)
@@ -432,7 +433,7 @@ local function ItemObjectiveXP(itemId, count, playerLevel)
     if b.xp <= 0 then b, elite = elites, true end
     if b.xp <= 0 then return 0, 0 end
     local kills = min(count / (b.rate / 100), count * MAX_KILLS_PER_ITEM)
-    return kills, kills * b.xp, b.npc, elite
+    return kills, kills * b.xp, b.npc, elite, b.rate
 end
 
 --- XP from the kills a quest's objectives require. Uses live counts for quests in the log.
@@ -491,12 +492,14 @@ local function ObjectiveMobXP(questId, playerLevel, inLog)
             itemIndex = itemIndex + 1
             local count = live and (live.item[itemIndex] or 0) or NextTextCount()
             if o[1] then
-                local kills, xp, npcId, eliteDrop = ItemObjectiveXP(o[1], count, playerLevel)
+                local kills, xp, npcId, eliteDrop, rate = ItemObjectiveXP(o[1], count, playerLevel)
                 if eliteDrop and kills > 0 then elite = true end
                 totalXP = totalXP + xp
                 totalKills = totalKills + kills
                 if npcId and kills > 0 then
-                    targets[#targets + 1] = { kind = "npc", id = npcId, count = kills }
+                    -- `drop` tells the guide where the kill count came from.
+                    targets[#targets + 1] = { kind = "npc", id = npcId, count = kills,
+                        drop = { item = o[1], count = count, rate = rate } }
                 elseif count > 0 and ItemDB then
                     -- Item comes from a container object (e.g. a crate) rather than a mob.
                     local objectsWithItem = ItemDB.objectDrops(o[1])

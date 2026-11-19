@@ -92,6 +92,29 @@ local function TargetName(kind, id)
     return type(name) == "string" and name or ("#" .. tostring(id))
 end
 
+local function ItemName(id)
+    local items = ns.Engine.GetData().Item
+    local name = items and Call(items.name, id)
+    if type(name) ~= "string" and GetItemInfo then name = Call(GetItemInfo, id) end
+    return type(name) == "string" and name or ("#" .. tostring(id))
+end
+
+--- "Item x5: Mob drops it 12%" for each item objective whose kill count comes from a drop
+--- rate, so the tooltip can explain large kill counts.
+local function DropLines(step)
+    local lines = {}
+    local list = step.members and OpenMembers(step) or { step }
+    for _, m in ipairs(list) do
+        local d = m.drop
+        if d and d.rate and d.rate > 0 then
+            local rate = d.rate < 10 and string.format("%.1f", d.rate) or string.format("%.0f", d.rate)
+            lines[#lines + 1] = string.format(L.PANEL_DROP, ItemName(d.item), math.max(1, math.ceil(d.count or 1)),
+                TargetName(m.targetKind, m.targetId), rate)
+        end
+    end
+    return lines
+end
+
 local CAMP_SHOWN = 3
 
 --- "Mob A x6, Mob B x3" for a camp, and the quest names it serves.
@@ -359,6 +382,13 @@ local function CreatePanel()
         row:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_LEFT")
             GameTooltip:AddLine(self.title or "", 1, 1, 1, true)
+            local drops = self.step and DropLines(self.step) or {}
+            if #drops > 0 then
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine(L.PANEL_DROP_TITLE, 1, 0.82, 0)
+                for _, line in ipairs(drops) do GameTooltip:AddLine(line, 1, 1, 1, true) end
+                GameTooltip:AddLine(" ")
+            end
             GameTooltip:AddLine(L.PANEL_CLICK_HINT, 0.6, 0.6, 0.6, true)
             GameTooltip:Show()
         end)

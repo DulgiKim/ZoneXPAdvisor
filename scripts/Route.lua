@@ -844,6 +844,7 @@ local function RouteSteps(zone, nodes, order, trips, groups)
                 step.members[#step.members + 1] = {
                     quest = id, name = names[id], area = t.area,
                     targetKind = t.target.kind, targetId = t.target.id, count = t.target.count,
+                    drop = t.target.drop,
                 }
             end
         end
@@ -862,7 +863,7 @@ local function RouteSteps(zone, nodes, order, trips, groups)
                 kind = node.kind, quest = node.quest, name = names[node.quest],
                 x = node.px, y = node.py,
                 targetKind = target and target.kind, targetId = target and target.id,
-                count = target and target.count,
+                count = target and target.count, drop = target and target.drop,
             }
             if node.members then
                 -- A camp: every objective killed or collected there, possibly of several quests.
@@ -871,7 +872,7 @@ local function RouteSteps(zone, nodes, order, trips, groups)
                     step.members[#step.members + 1] = {
                         quest = m.quest, name = names[m.quest],
                         targetKind = m.target and m.target.kind, targetId = m.target and m.target.id,
-                        count = m.target and m.target.count,
+                        count = m.target and m.target.count, drop = m.target and m.target.drop,
                     }
                 end
             end
