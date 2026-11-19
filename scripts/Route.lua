@@ -51,6 +51,9 @@ local DUNGEON_RUN = 30 * 60
 -- Trips are only judged against the zone's own work when there is at least this much of it
 -- (s); a hub such as a city mostly sends you elsewhere, so its trips are its content.
 local HOME_MIN_TIME = 20 * 60
+-- Times the route is planned again to fit the quest log (each pass drops the cheapest quests
+-- held at the fullest moment; replanning can move that moment).
+local LOG_PASSES = 3
 
 --- Seconds per kill of one NPC including downtime. Uses this character's measured pace
 --- (KillTimer.lua) once enough kills are recorded, adjusted for the mob's level and rank.
@@ -942,6 +945,33 @@ local function PlanRoute(nodes, zone, width, height, yield)
     return order, sx, sy, distance, actions
 end
 
+--- Quest log room along the route: walks it (pickups +1, turn-ins -1; trips' turn-ins at
+--- the end) and returns how many quests the fullest moment is over `free`, and the quests
+--- picked up on the route still open at that moment.
+local function LogOverflow(zone, nodes, order, trips, groups, free)
+    local inLog = {}
+    for _, q in ipairs(zone.quests) do
+        if q.status == "active" or q.status == "ready" then inLog[q.id] = true end
+    end
+    local open, held, peak, atPeak = {}, 0, 0, {}
+    local function Snapshot()
+        atPeak = {}
+        for id in pairs(open) do atPeak[#atPeak + 1] = id end
+    end
+    for _, index in ipairs(order) do
+        local node = nodes[index]
+        if node.kind == "pickup" and not inLog[node.quest] and not open[node.quest] then
+            open[node.quest] = true
+            held = held + 1
+            if held > peak then peak = held Snapshot() end
+        elseif node.kind == "turnin" and open[node.quest] then
+            open[node.quest] = nil
+            held = held - 1
+        end
+    end
+    return peak - free, atPeak
+end
+
 --- Plans a zone's route and stores routeTime (s), routeDistance (yards), travelTime,
 --- actionTime and xpPerHour on the zone. `yield` lets the caller spread work over frames.
 ---
@@ -1009,24 +1039,53 @@ function Route.Compute(zone, ctx, yield)
     chainCount, chainXP = chainCount + moreCount, chainXP + moreXP
     for _, q in ipairs(zone.quests) do q.dropped = dropped[q.id] or nil end
 
-    if droppedCount + moreCount > 0 then
-        -- Plan again without the dropped quests (their pickups are no longer stops).
+    -- Plan again without the dropped quests (their pickups are no longer stops).
+    local function Replan()
         if yield then yield() end
         nodes, trips = BuildNodes(zone, ctx, data, width, height, dropped)
         order, sx, sy, distance, actions = {}, sx, sy, 0, 0
         if #nodes > 0 then order, sx, sy, distance, actions = PlanRoute(nodes, zone, width, height, nil) end
         -- Kept trips lose quests that were stranded by the drops (and the trip, if empty).
-        groups = {}
+        local still = {}
         for _, g in ipairs(kept) do
             local left = {}
             for _, id in ipairs(g.quests) do if trips[id] then left[#left + 1] = id end end
             if #left > 0 then
                 g.quests = left
-                groups[#groups + 1] = g
+                still[#still + 1] = g
             end
         end
-    else
+        kept = still
         groups = kept
+    end
+    if droppedCount + moreCount > 0 then Replan() else groups = kept end
+
+    -- Quest log room: the route can't hold more quests at once than the log has free slots.
+    -- At the fullest moment, the least rewarding quests picked up on the route are left out.
+    local logCount, logXP = 0, 0
+    if ctx.logCap and ctx.logCount then
+        for _ = 1, LOG_PASSES do
+            local over, candidates = LogOverflow(zone, nodes, order, trips, groups, ctx.logCap - ctx.logCount)
+            if over <= 0 then break end
+            local function Value(id)
+                local q = questOf[id]
+                return q and (q.total or 0) * ns.Engine.QuestWeight(q.status) or 0
+            end
+            table.sort(candidates, function(a, b)
+                local va, vb = Value(a), Value(b)
+                if va ~= vb then return va < vb end
+                return a < b
+            end)
+            for i = 1, min(over, #candidates) do
+                local id = candidates[i]
+                dropped[id] = true
+                logCount, logXP = logCount + 1, logXP + Value(id)
+            end
+            local n, x = DropOrphanChains(zone, data.Quest, dropped)
+            chainCount, chainXP = chainCount + n, chainXP + x
+            Replan()
+        end
+        for _, q in ipairs(zone.quests) do q.dropped = dropped[q.id] or nil end
     end
     if #nodes == 0 and #groups == 0 then return end
 
@@ -1063,6 +1122,8 @@ function Route.Compute(zone, ctx, yield)
     zone.awayDroppedXP = droppedCount > 0 and droppedXP or nil
     zone.chainDropped = chainCount > 0 and chainCount or nil
     zone.chainDroppedXP = chainCount > 0 and chainXP or nil
+    zone.logDropped = logCount > 0 and logCount or nil
+    zone.logDroppedXP = logCount > 0 and logXP or nil
     zone.routeTime = travel + actions + (approach or 0) + awayTime + dungeonTime
     zone.routeStops = #order
     zone.routeSteps = RouteSteps(zone, nodes, order, trips, groups)

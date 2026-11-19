@@ -3,7 +3,7 @@
 ## Title-koKR: ZoneXP Advisor (레벨업 지역 추천)
 ## Notes: Recommends the best leveling zones from your current XP and quest progress. Reads quest data from QuestieDB when installed.
 ## Notes-koKR: 현재 경험치와 퀘스트 진행도를 바탕으로 레벨업에 가장 좋은 지역을 추천합니다. QuestieDB가 설치되어 있으면 그 데이터를 읽어서 사용합니다.
-## Version: 1.1.0
+## Version: 1.1.1
 ## Author: DulgiKim
 ## Category: Quests
 ## X-License: GPL-3.0

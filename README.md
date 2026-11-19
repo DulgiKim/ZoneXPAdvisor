@@ -24,8 +24,8 @@ Built for **World of Warcraft Forever** (Interface 16001). Works for both **Alli
 
 ## Features
 
-- **Zone ranking** — top zones by estimated XP, counting quests to turn in, in progress, available now, unlocked by a prerequisite or within 1–2 levels. Completed, grey, repeatable, holiday, battleground, profession and other-faction quests are skipped; dungeon quests count only for dungeons you plan to run.
-- **Quest XP + kill XP** — quest rewards scaled with the classic XP rules, plus XP from the mobs your quests require (item drops estimated from drop rates). Kill XP follows the classic formula: level difference, grey = 0, elites ×2.
+- **Zone ranking** — top zones by estimated XP, counting quests to turn in, in progress, available now, unlocked by a prerequisite or within 1–2 levels. Completed, grey (not yet picked up), repeatable, holiday, battleground, profession and other-faction quests are skipped; dungeon quests count only for dungeons you plan to run, and quests started by an item only once you have it. The route never needs more quests at once than your log has room for.
+- **Quest XP + kill XP** — quest rewards reduced by level gap the way WoW Forever pays them (half from 8 levels above), the game's own reward for quests in your log, plus XP from the mobs your quests require (item drops estimated from drop rates). Kill XP follows the classic formula: level difference, grey = 0, elites ×2.
 - **Optimized quest route** — a precedence-aware route (pick up → objectives → turn in, chains in order) built with nearest-neighbour + 2-opt + Or-opt, with travel, fighting and talking time and **XP per hour**. Includes getting to the zone, and levels you up along the way (later quests and kills give less as you level).
 - **Trips and dungeons** — objectives in other zones are grouped per destination and kept only when the trip pays off (follow-up quests included); kept trips are done at the end of the zone. Ctrl+click a zone to plan its dungeons: a planned dungeon becomes one step in the route.
 - **Reputation estimate** — the zone tooltip lists the reputation its quests give per faction.
@@ -78,8 +78,8 @@ ZoneXP Advisor is an independent project and is not affiliated with or endorsed 
 
 ### 기능
 
-- **지역 순위**: 완료 보고, 진행 중, 지금 받을 수 있는 퀘스트, 선행 퀘스트 뒤에 열리는 퀘스트, 1~2레벨 뒤 퀘스트를 계산합니다. 완료/회색/반복/축제/전장/전문기술/다른 진영 퀘스트는 제외하고, 던전 퀘스트는 방문하기로 정한 던전만 계산합니다.
-- **퀘스트 + 처치 경험치**: 클래식 규칙으로 보상을 조정하고, 퀘스트 목표 몬스터의 경험치도 더합니다. 아이템 목표는 드롭률로 처치 수를 계산합니다.
+- **지역 순위**: 완료 보고, 진행 중, 지금 받을 수 있는 퀘스트, 선행 퀘스트 뒤에 열리는 퀘스트, 1~2레벨 뒤 퀘스트를 계산합니다. 완료/회색/반복/축제/전장/전문기술/다른 진영 퀘스트는 제외하고, 던전 퀘스트는 방문하기로 정한 던전만, 아이템으로 시작하는 퀘스트는 아이템이 있을 때만 계산합니다. 동선은 퀘스트 목록 빈자리를 넘지 않게 짭니다.
+- **퀘스트 + 처치 경험치**: WoW Forever 규칙(8레벨 이상 높으면 50%)으로 보상을 줄이고, 퀘스트 목록에 있는 퀘스트는 게임 보상값을 쓰며, 퀘스트 목표 몬스터의 경험치도 더합니다. 아이템 목표는 드롭률로 처치 수를 계산합니다.
 - **최적 퀘스트 동선**: 받기 → 목표 → 보고 순서를 지키는 경로를 최근접 이웃 + 2-opt + Or-opt로 계산하고, 소요 시간과 **시간당 경험치**를 보여줍니다. 지역까지 가는 시간과, 동선 중 레벨업으로 경험치가 줄어드는 것까지 계산합니다.
 - **다른 지역과 던전**: 다른 지역 목표는 목적지별로 묶어서 이동할 가치가 있을 때만 넣고(연계 퀘스트 포함), 지역 동선 끝에 다녀옵니다. 지역을 Ctrl+클릭하면 그 지역 던전을 방문 예정으로 정하고, 던전은 동선의 한 단계가 됩니다.
 - **평판 예상**: 지역 툴팁에 퀘스트로 얻는 평판을 진영별로 보여 줍니다.

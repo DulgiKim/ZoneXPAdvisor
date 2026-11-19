@@ -246,39 +246,39 @@ end
 -- XP estimate
 ---------------------------------------------------------------------------------------------
 
---- Level-scaled quest XP, following the classic server rules: full XP up to 5 levels above
---- the quest, then 20% less per level down to a 10% floor, rounded the way the server rounds.
-local function ScaleXP(baseXP, questLevel, playerLevel)
-    local factor = 2 * (questLevel - playerLevel) + 20
-    if factor < 1 then factor = 1 elseif factor > 10 then factor = 10 end
-
-    local xp = baseXP * factor / 10
-    if xp <= 100 then
-        xp = 5 * floor((xp + 2) / 5)
-    elseif xp <= 500 then
-        xp = 10 * floor((xp + 5) / 10)
-    elseif xp <= 1000 then
-        xp = 25 * floor((xp + 12) / 25)
-    else
-        xp = 50 * floor((xp + 25) / 50)
-    end
-    return xp
+--- Share of a quest's reward by how far the player is above it, as WoW Forever pays it
+--- (measured by players): full up to 5 levels above, 80% at 6, 60% at 7, and half from 8 on.
+--- Unlike classic (down to 10%), grey quests still give half their reward.
+local QUEST_SHARE = { [6] = 0.8, [7] = 0.6 }
+local function QuestShare(questLevel, playerLevel)
+    local above = playerLevel - questLevel
+    if above <= 5 then return 1 end
+    return QUEST_SHARE[above] or 0.5
 end
 
+local function ScaleXP(baseXP, questLevel, playerLevel)
+    return floor(baseXP * QuestShare(questLevel, playerLevel) + 0.5)
+end
+
+--- The reward the client shows for a quest in the log (exact, already reduced for the
+--- player's level), or nil.
+local function ClientRewardXP(questId)
+    if not (GetQuestLogRewardXP and C_QuestLog and C_QuestLog.GetLogIndexForQuestID) then return nil end
+    if not C_QuestLog.GetLogIndexForQuestID(questId) then return nil end
+    local ok, xp = pcall(GetQuestLogRewardXP, questId)
+    if ok and type(xp) == "number" and xp > 0 then return xp end
+end
+
+--- Quest XP now: the client's own reward for quests in the log, else the DB's reward reduced
+--- for the level gap. Second value: true when it came from the DB (calibration applies).
 local function EstimateXP(questId, playerLevel)
+    local client = ClientRewardXP(questId)
+    if client then return client, false end
     local entry = questXP and questXP[questId]
     if entry then
         local level, xp = entry[1], entry[2]
         if level and xp and level > 0 and xp > 0 then
             return ScaleXP(xp, level, playerLevel), true
-        end
-    end
-    if GetQuestLogRewardXP and C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
-        -- Fallback for quests already in the log: ask the client.
-        local index = C_QuestLog.GetLogIndexForQuestID(questId)
-        if index then
-            local ok, xp = pcall(GetQuestLogRewardXP, questId)
-            if ok and type(xp) == "number" then return xp, false end
         end
     end
     return 0, false
@@ -642,6 +642,7 @@ local function AddToZone(zones, zoneId, questId, name, questLevel, xp, status, m
         xp = xp, baseXP = xp, mobXP = mobXP, kills = kills, total = xp + mobXP, targets = targets, elite = elite,
         dungeon = dungeon, -- name of the (planned) dungeon its objectives are done in
     }
+    local entry = zone.quests[#zone.quests]
     -- Reputation rewards: { {factionId, amount}, ... } in QuestieDB.
     local rewards = QuestDB and QuestDB.reputationReward and QuestDB.reputationReward(questId)
     if type(rewards) == "table" then
@@ -652,6 +653,7 @@ local function AddToZone(zones, zoneId, questId, name, questLevel, xp, status, m
             end
         end
     end
+    return entry
 end
 
 --- Builds the scan context shared by every quest evaluation.
@@ -843,6 +845,28 @@ local function DungeonOf(questId, logEntry, zoneOrSort, targets, zoneName)
     return ns.L.DUNGEON_UNKNOWN
 end
 
+--- True when only items start the quest (no NPC or object gives it).
+local function ItemStartedOnly(startedBy)
+    if type(startedBy) ~= "table" then return false end
+    local npcs, objects, items = startedBy[1], startedBy[2], startedBy[3]
+    local hasNpc = type(npcs) == "table" and npcs[1] ~= nil
+    local hasObject = type(objects) == "table" and objects[1] ~= nil
+    return not hasNpc and not hasObject and type(items) == "table" and items[1] ~= nil
+end
+
+--- True when a starter item of the quest is in the bags.
+local function HasStarterItem(startedBy)
+    local items = type(startedBy) == "table" and startedBy[3]
+    if type(items) ~= "table" then return false end
+    local count = (C_Item and C_Item.GetItemCount) or GetItemCount
+    if not count then return false end
+    for _, itemId in ipairs(items) do
+        local ok, n = pcall(count, itemId)
+        if ok and type(n) == "number" and n > 0 then return true end
+    end
+    return false
+end
+
 --- Adds one quest to the zone table, if it counts.
 local function ScoreQuest(ctx, zones, questId)
     local logEntry = ctx.log[questId]
@@ -852,13 +876,18 @@ local function ScoreQuest(ctx, zones, questId)
     else
         status = EvaluateQuest(ctx, questId, 0)
         if not status then return end
-        -- Grey quests are not worth travelling for. They still count as prerequisites above.
+        -- Grey quests not taken yet are left out: WoW Forever still pays half their reward
+        -- (QuestShare), but their mobs give no XP, so the work rarely pays off. Grey quests in
+        -- the log count at half. They still count as prerequisites above.
         local level = QuestDB.questLevel(questId)
         if level and level > 0 and level <= GreyLevel(ctx.playerLevel) then return end
     end
 
     local zoneOrSort = QuestDB.zoneOrSort(questId)
     local startedBy = QuestDB.startedBy(questId)
+    -- Quests started by an item (often a chance drop from mobs) can only be planned once the
+    -- item is in the bags: before that nobody can say when, or whether, it drops.
+    if not logEntry and ItemStartedOnly(startedBy) and not HasStarterItem(startedBy) then return end
     local zone = ResolveZone(questId, zoneOrSort, startedBy)
     if not zone or dungeonAreas[zone] then return end
 
@@ -899,7 +928,11 @@ local function ScoreQuest(ctx, zones, questId)
 
     local name = (logEntry and logEntry.title) or QuestDB.name(questId) or ("#" .. questId)
     local questLevel = QuestDB.questLevel(questId) or (logEntry and logEntry.level)
-    AddToZone(zones, zone, questId, name, questLevel, xp, status, mobXP, kills, targets, elite, dungeon)
+    local entry = AddToZone(zones, zone, questId, name, questLevel, xp, status, mobXP, kills, targets, elite, dungeon)
+    if not fromDB and logEntry then
+        -- The client's reward: exact now, scaled from here on in the level-up simulation.
+        entry.clientXP, entry.clientLevel = xp, ctx.playerLevel
+    end
 end
 
 --- Adds one NPC's spawns to the hunting-ground totals if it is a good solo target.
@@ -1022,7 +1055,14 @@ end
 --- Quest reward at a given player level; quests without DB data keep their client value.
 local function QuestXPAt(quest, level)
     local entry = questXP and questXP[quest.id]
-    if entry and entry[1] and entry[2] and entry[1] > 0 and entry[2] > 0 then
+    local hasDB = entry and entry[1] and entry[2] and entry[1] > 0 and entry[2] > 0
+    if quest.clientXP then
+        -- The client's reward is exact at the level it was read; later levels scale it by the
+        -- same level-gap rule.
+        if not hasDB or level == quest.clientLevel then return quest.clientXP end
+        return floor(quest.clientXP * QuestShare(entry[1], level) / QuestShare(entry[1], quest.clientLevel) + 0.5)
+    end
+    if hasDB then
         return floor(ScaleXP(entry[2], entry[1], level) * questFactor + 0.5)
     end
     return quest.baseXP or quest.xp
@@ -1139,6 +1179,13 @@ function Engine.StartScan(factionMode, onProgress, onDone)
 
     local ctx = NewContext(factionMode)
     ctx.greyLevel = GreyLevel(ctx.playerLevel)
+    -- Quest log room for route planning (own faction only: the log is this character's).
+    if ctx.isOwnFaction then
+        local count = 0
+        for _ in pairs(ctx.log) do count = count + 1 end
+        local cap = C_QuestLog and C_QuestLog.GetMaxNumQuestsCanAccept and tonumber(C_QuestLog.GetMaxNumQuestsCanAccept())
+        ctx.logCount, ctx.logCap = count, (cap and cap > 0) and cap or 40
+    end
     npcXPCache = {}
 
     local zones, hunt = {}, {}

@@ -18,6 +18,7 @@ local MIN_QUEST_SAMPLES = 3
 local MIN_KILL_SAMPLES = 5
 local MIN_RATIO, MAX_RATIO = 0.25, 4   -- ratios outside this are bad matches, not real modifiers
 local FACTOR_MIN, FACTOR_MAX = 0.5, 3
+local QUEST_RULE = 2                   -- version of Engine's quest XP rule the samples were taken with
 
 Calibration.MIN_QUEST_SAMPLES = MIN_QUEST_SAMPLES
 Calibration.MIN_KILL_SAMPLES = MIN_KILL_SAMPLES
@@ -38,6 +39,12 @@ local function Store()
     if not store then
         store = {}
         db.calibration[key] = store
+    end
+    -- Quest samples are ratios against the predicted reward; when the prediction rule changes
+    -- (WoW Forever's level-gap rule instead of classic's) the old ones no longer fit.
+    if store.questRule ~= QUEST_RULE then
+        store.quest = {}
+        store.questRule = QUEST_RULE
     end
     store.quest = store.quest or {}
     store.kill = store.kill or {}

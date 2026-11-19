@@ -417,6 +417,10 @@ local function ShowZoneTooltip(row)
         GameTooltip:AddLine(string.format(L.TT_CHAIN_DROPPED, zone.chainDropped, FormatNumber(zone.chainDroppedXP or 0)),
             0.6, 0.6, 0.6, true)
     end
+    if zone.logDropped then
+        GameTooltip:AddLine(string.format(L.TT_LOG_DROPPED, zone.logDropped, FormatNumber(zone.logDroppedXP or 0)),
+            0.6, 0.6, 0.6, true)
+    end
     AddDungeonLines(zone)
 
     if zone.routeTime then

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.1
+
+### English
+- Quest XP follows WoW Forever's rule: full reward up to 5 levels above the quest, 80% at 6, 60% at 7, and half from 8 on (classic went down to 10%). Grey quests already in your log count at half; grey quests not picked up yet are still skipped, since their mobs give no XP. Quest XP calibration taken with the old rule is reset once (kill calibration is kept).
+- Quests in your log use the reward the game shows for them, and level-ups along the route lower it by the same rule.
+- Quest log room: the route keeps track of how many quests you carry at once. When it would need more than your free log slots (40 minus what you hold), the least rewarding quests held at the fullest moment are left out, along with follow-ups that need them, and the route is planned again. The tooltip says how many were skipped.
+- Fix: quests started by an item (often a chance drop from mobs) were counted as "available" before you had the item. They now count only once the item is in your bags.
+
+### 한국어
+- 퀘스트 경험치는 WoW Forever 규칙을 따릅니다. 퀘스트보다 5레벨 높을 때까지 100%, 6레벨 80%, 7레벨 60%, 8레벨 이상 50%입니다(클래식은 10%까지 줄었습니다). 퀘스트 목록에 이미 있는 회색 퀘스트는 50%로 계산하고, 아직 받지 않은 회색 퀘스트는 몬스터 경험치가 없어서 계속 뺍니다. 예전 규칙으로 쌓인 퀘스트 경험치 보정은 한 번 초기화됩니다(처치 보정은 유지).
+- 퀘스트 목록에 있는 퀘스트는 게임이 보여 주는 보상값을 쓰고, 동선 중 레벨이 오르면 같은 규칙으로 줄입니다.
+- 퀘스트 목록 자리: 동선을 따라 동시에 들고 있는 퀘스트 수를 계산합니다. 빈자리(40에서 지금 들고 있는 수를 뺀 값)보다 많이 필요하면, 가장 많이 차는 순간에 들고 있는 퀘스트 중 경험치가 낮은 것부터 빼고(그 퀘스트가 필요한 연계 퀘스트도 같이) 동선을 다시 짭니다. 툴팁에 몇 개를 뺐는지 나옵니다.
+- 수정: 아이템으로 시작하는 퀘스트(몬스터가 확률로 떨구는 경우가 많음)를 아이템이 없어도 "받을 수 있음"으로 계산하던 문제를 고쳤습니다. 이제 아이템이 가방에 있을 때만 계산합니다.
+
 ## 1.1.0
 
 ### English
