@@ -36,7 +36,8 @@ Built for **World of Warcraft Forever** (Interface 16001). Works for both **Alli
 - **Next-steps panel** — the next 5 stops of the route in the zone you are in (pick up, kill / collect, turn in). Finished steps disappear as you play; click one to set a waypoint (TomTom when installed).
 - **Session report** — XP per hour this session, quest vs. kill XP, per-zone rate compared with the prediction, and time to your next level.
 - **Move-on alert** — a message when your zone has little XP left or another zone gives at least 1.5x the XP per hour (not in towns, inns or instances).
-- **UI** — XP bar with rested XP, rank badges, difficulty-colored levels, progress bars, current-zone highlight, sort by total XP or XP per hour, Auto / Alliance / Horde view.
+- **World map** — continent maps tint the 10 best zones by XP per hour with rank medals; zone maps draw your route's next stops (click one for a waypoint). Each can be turned off.
+- **UI** — parchment windows in a teal frame (or dark mode, with adjustable opacity), XP bar with rested XP, rank medals, difficulty-colored levels, progress bars, current-zone highlight, sort by total XP or XP per hour, Auto / Alliance / Horde view.
 - **Minimap button** — left-click: window, right-click: settings, Shift + left-click: switch sort, drag: move. Also in the addon compartment.
 - **Settings** — General, Guide, Kill time, Accuracy and About tabs. Language: game language, English or 한국어.
 
@@ -91,6 +92,8 @@ ZoneXP Advisor is an independent project and is not affiliated with or endorsed 
 - **세션 리포트**: 이번 세션 시간당 경험치, 퀘스트/처치 비율, 지역별 실제와 예상 비교, 다음 레벨까지 남은 시간
 - **이동 알림**: 이 지역에 남은 경험치가 적거나 다른 지역이 시간당 1.5배 이상이면 알려 줍니다(마을, 여관, 인스턴스 제외).
 - **미니맵 버튼**: 왼쪽 클릭 창, 오른쪽 클릭 설정, Shift + 왼쪽 클릭 정렬 전환, 드래그 이동
+- **세계 지도**: 대륙 지도에 시간당 경험치 상위 10개 지역을 색칠하고 순위 메달을 표시하며, 지역 지도에 동선의 다음 경유지를 그립니다(클릭하면 목적지 표시). 각각 끌 수 있습니다.
+- **디자인**: 청록 테두리의 양피지 창(또는 다크 모드, 불투명도 조절), 휴식 경험치가 보이는 경험치 바, 순위 메달, 난이도 색 레벨, 진행 바, 현재 지역 강조
 - **설정 창**: 일반 / 가이드 / 전투 시간 / 정확도 / 정보 탭. 언어: 게임 언어 / English / 한국어
 
 ### 명령어

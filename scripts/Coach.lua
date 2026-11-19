@@ -156,9 +156,19 @@ end
 local STEP_ICON = {
     pickup = "Interface\\GossipFrame\\AvailableQuestIcon",
     turnin = "Interface\\GossipFrame\\ActiveQuestIcon",
-    npc = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8",
+    npc = ns.Theme.Art("swords"),
     object = "Interface\\Icons\\INV_Misc_Bag_10",
 }
+
+--- Icon of a step: quest marks for pickups and turn-ins, else what is killed or collected.
+local function StepIcon(step)
+    if step.kind == "objective" or step.kind == "away" or step.kind == "dungeon" then
+        local kind = step.targetKind
+        if step.members then kind = select(3, CampText(step)) and "npc" or "object" end
+        return STEP_ICON[kind] or STEP_ICON.npc
+    end
+    return STEP_ICON[step.kind]
+end
 
 ---------------------------------------------------------------------------------------------
 -- Zones
@@ -235,13 +245,7 @@ local function RenderPanel()
                 row.step, row.uiMapId, row.title = step, zone.uiMapId, main
                 row.main:SetText(main)
                 row.sub:SetText(sub)
-                local icon = STEP_ICON[step.kind]
-                if step.kind == "objective" or step.kind == "away" or step.kind == "dungeon" then
-                    local kind = step.targetKind
-                    if step.members then kind = select(3, CampText(step)) and "npc" or "object" end
-                    icon = STEP_ICON[kind] or STEP_ICON.npc
-                end
-                row.icon:SetTexture(icon)
+                row.icon:SetTexture(StepIcon(step))
                 row:Show()
             end
         end
@@ -268,7 +272,8 @@ local function RenderPanel()
     end
     local height = 30 + math.max(shown, shown == 0 and 2 or 0) * STEP_HEIGHT + 8
     panel:SetHeight(height)
-    panelTitle:SetTextColor(C.gold[1], C.gold[2], C.gold[3])
+    local teal = ns.Theme.colors.teal
+    panelTitle:SetTextColor(teal[1], teal[2], teal[3])
 end
 
 --- Redraws the panel at most once per second (QUEST_LOG_UPDATE fires in bursts).
@@ -305,8 +310,10 @@ local function CreatePanel()
         panel:SetPoint("RIGHT", UIParent, "RIGHT", -260, 80)
     end
 
-    panelTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    panelTitle:SetPoint("TOPLEFT", 10, -9)
+    local compass = ns.Theme.Icon(panel, "compass", 18, "OVERLAY")
+    compass:SetPoint("TOPLEFT", 8, -6)
+    panelTitle = panel:CreateFontString(nil, "OVERLAY", ns.Theme.Font("GameFontNormal"))
+    panelTitle:SetPoint("TOPLEFT", 30, -9)
     panelTitle:SetPoint("RIGHT", -24, 0)
     panelTitle:SetJustifyH("LEFT")
 
@@ -322,16 +329,17 @@ local function CreatePanel()
         row:SetPoint("TOPLEFT", 8, -28 - (i - 1) * STEP_HEIGHT)
         local highlight = row:CreateTexture(nil, "HIGHLIGHT")
         highlight:SetTexture("Interface\\Buttons\\WHITE8X8")
-        highlight:SetVertexColor(1, 1, 1, 0.07)
+        local hover = ns.Theme.colors.rowHover
+        highlight:SetVertexColor(hover[1], hover[2], hover[3], hover[4])
         highlight:SetAllPoints()
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetSize(16, 16)
         row.icon:SetPoint("TOPLEFT", 2, -3)
-        row.main = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.main = row:CreateFontString(nil, "OVERLAY", ns.Theme.Font("GameFontHighlightSmall"))
         row.main:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, -1)
         row.main:SetPoint("RIGHT", -4, 0)
         row.main:SetJustifyH("LEFT")
-        row.sub = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        row.sub = row:CreateFontString(nil, "OVERLAY", ns.Theme.Font("GameFontDisableSmall"))
         row.sub:SetPoint("TOPLEFT", row.main, "BOTTOMLEFT", 0, -2)
         row.sub:SetPoint("RIGHT", -4, 0)
         row.sub:SetJustifyH("LEFT")
@@ -359,7 +367,7 @@ local function CreatePanel()
         stepRows[i] = row
     end
 
-    panelEmpty = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    panelEmpty = panel:CreateFontString(nil, "OVERLAY", ns.Theme.Font("GameFontHighlightSmall"))
     panelEmpty:SetPoint("TOPLEFT", 12, -30)
     panelEmpty:SetPoint("RIGHT", -12, 0)
     panelEmpty:SetJustifyH("LEFT")
@@ -367,6 +375,9 @@ local function CreatePanel()
     if panelEmpty.SetWordWrap then panelEmpty:SetWordWrap(true) end
 
     panel:SetScript("OnShow", RenderPanel)
+    ns.Theme.OnChange(function()
+        if panel:IsShown() then RenderPanel() end
+    end)
     panel:Hide()
 end
 
@@ -510,7 +521,7 @@ end
 local function ReportLines()
     local U = UI()
     local N, D = U.FormatNumber, U.FormatDuration
-    local gold, muted = U.Hex(U.Colors.gold), U.Hex(U.Colors.muted)
+    local gold, muted = U.Hex(ns.Theme.colors.teal), U.Hex(ns.Theme.colors.inkMuted)
     local s = session
     local lines = {}
     local function Add(text) lines[#lines + 1] = text end
@@ -580,17 +591,12 @@ local function CreateReport()
     report:SetScript("OnDragStop", report.StopMovingOrSizing)
     U.ApplyBackdrop(report, C.bg, C.border, 16)
 
-    local titleBg = U.SolidTexture(report, "BORDER", C.titleBg)
-    titleBg:SetPoint("TOPLEFT", 4, -4)
-    titleBg:SetPoint("TOPRIGHT", -4, -4)
-    titleBg:SetHeight(30)
-    local title = report:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("LEFT", titleBg, "LEFT", 10, 0)
-    title:SetText(L.REPORT_TITLE)
+    ns.Theme.Banner(report, L.REPORT_TITLE, "hourglass")
     local close = CreateFrame("Button", nil, report, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 0, 0)
 
-    reportText = report:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    reportText = report:CreateFontString(nil, "OVERLAY", ns.Theme.Font("GameFontHighlight"))
+    ns.Theme.OnChange(Coach.RenderReport) -- its headings are inline colours
     reportText:SetPoint("TOPLEFT", 16, -44)
     reportText:SetPoint("RIGHT", -16, 0)
     reportText:SetJustifyH("LEFT")
@@ -741,6 +747,12 @@ events:SetScript("OnEvent", function(_, event, arg1, arg2)
         Tick()
     end
 end)
+
+-- Shared with Map.lua
+Coach.StepDone = StepDone
+Coach.StepText = StepText
+Coach.StepIcon = StepIcon
+Coach.SetWaypoint = SetWaypoint
 
 -- Exposed for tests.
 Coach._MoveOnText = MoveOnText

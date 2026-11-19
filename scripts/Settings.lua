@@ -21,6 +21,8 @@ local TAB_WIDTH = 92
 
 local frame, tabs, pages, killStatus, killStats, soloCheck, modeButtons, minimapCheck
 local eliteCheck, restedStatus, calibrationStatus, languageButtons, panelCheck, alertCheck
+local themeButtons, opacitySlider, opacityText
+local heatCheck, routeCheck
 
 local RELOAD_POPUP = "ZONEXPADVISOR_RELOAD_LANGUAGE"
 if StaticPopupDialogs then
@@ -47,7 +49,7 @@ end
 ---------------------------------------------------------------------------------------------
 
 local function Label(parent, text, template)
-    local fs = parent:CreateFontString(nil, "OVERLAY", template or "GameFontHighlight")
+    local fs = parent:CreateFontString(nil, "OVERLAY", ns.Theme.Font(template or "GameFontHighlight"))
     fs:SetJustifyH("LEFT")
     fs:SetText(text or "")
     return fs
@@ -60,7 +62,7 @@ local function Paragraph(parent, text, anchor, offsetY)
     fs:SetPoint("RIGHT", parent, "RIGHT", -16, 0)
     fs:SetJustifyV("TOP")
     if fs.SetWordWrap then fs:SetWordWrap(true) end
-    fs:SetTextColor(0.75, 0.75, 0.75)
+    ns.Theme.Text(fs, "inkMuted")
     return fs
 end
 
@@ -147,8 +149,68 @@ end
 -- Pages
 ---------------------------------------------------------------------------------------------
 
+--- Window opacity slider (percent), drawn in the theme's own trough.
+local function OpacitySlider(parent, onChange)
+    local slider = CreateFrame("Slider", nil, parent)
+    slider:SetOrientation("HORIZONTAL")
+    slider:SetSize(120, 16)
+    slider:SetMinMaxValues(30, 100)
+    slider:SetValueStep(5)
+    if slider.SetObeyStepOnDrag then slider:SetObeyStepOnDrag(true) end
+    slider:EnableMouse(true)
+    local track = slider:CreateTexture(nil, "BACKGROUND")
+    track:SetTexture(ns.Theme.Art("bar-frame"))
+    track:SetPoint("LEFT", -4, 0)
+    track:SetPoint("RIGHT", 4, 0)
+    track:SetHeight(10)
+    slider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    local thumb = slider.GetThumbTexture and slider:GetThumbTexture()
+    if thumb then thumb:SetSize(32, 32) end
+    slider:SetScript("OnValueChanged", function(self, value, userInput)
+        local step = math.floor(value / 5 + 0.5) * 5
+        opacityText:SetText(string.format(L.SET_OPACITY, step))
+        if userInput ~= false then onChange(step) end
+    end)
+    return slider
+end
+
+--- Shows the saved theme mode and opacity (the slider's floor is the mode's minimum).
+local function RefreshLook()
+    if not themeButtons then return end
+    for k, b in pairs(themeButtons) do b:SetChecked(k == ns.Theme.mode) end
+    opacitySlider:SetMinMaxValues(ns.Theme.MinOpacity() * 100, 100)
+    local value = math.floor(ns.Theme.Opacity() * 100 + 0.5)
+    opacitySlider:SetValue(value)
+    opacityText:SetText(string.format(L.SET_OPACITY, value))
+end
+
 local function BuildGeneral(page)
     local title = SectionTitle(page, L.SET_GENERAL_TITLE)
+
+    -- Window look, in the right-hand column: parchment or dark, and the opacity.
+    local look = Label(page, L.SET_LOOK_TITLE, "GameFontNormal")
+    look:SetPoint("TOPLEFT", 260, -14)
+    themeButtons = {}
+    local previous
+    for _, key in ipairs(ns.Theme.MODES) do
+        local rb = RadioButton(page, key == "dark" and L.SET_THEME_DARK or L.SET_THEME_PARCHMENT, function()
+            ns.Theme.Set("theme", key)
+            RefreshLook()
+        end)
+        if previous then
+            rb:SetPoint("LEFT", previous.label, "RIGHT", 18, 0)
+        else
+            rb:SetPoint("TOPLEFT", look, "BOTTOMLEFT", 2, -10)
+        end
+        themeButtons[key] = rb
+        previous = rb
+    end
+    opacityText = Label(page, "", "GameFontHighlightSmall")
+    opacityText:SetPoint("TOPLEFT", themeButtons.parchment, "BOTTOMLEFT", 0, -12)
+    opacitySlider = OpacitySlider(page, function(percent)
+        if math.abs(percent / 100 - ns.Theme.Opacity()) > 0.001 then ns.Theme.Set("opacity", percent / 100) end
+    end)
+    opacitySlider:SetPoint("LEFT", opacityText, "LEFT", 86, 0)
 
     minimapCheck = CheckBox(page, L.SET_MINIMAP, function(checked)
         local db = ns.UI.GetDB()
@@ -225,12 +287,28 @@ local function BuildGuide(page)
         if ns.Coach then ns.Coach.ResetSession() end
     end)
     reset:SetPoint("LEFT", open, "RIGHT", 8, 0)
+
+    local mapTitle = SectionTitle(page, L.SET_MAP_TITLE, open, -22)
+    local function MapOption(key, text, anchor, offsetX, offsetY)
+        local cb = CheckBox(page, text, function(checked)
+            ns.UI.GetDB()[key] = checked
+            if ns.Map then ns.Map.Refresh() end
+        end)
+        cb:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", offsetX, offsetY)
+        return cb
+    end
+    heatCheck = MapOption("mapHeat", L.SET_MAP_HEAT, mapTitle, -4, -8)
+    routeCheck = MapOption("mapRoute", L.SET_MAP_ROUTE, heatCheck, 0, 0)
+    local mapText = Paragraph(page, L.SET_MAP_DESC, routeCheck, -4)
+    mapText:SetPoint("TOPLEFT", routeCheck, "BOTTOMLEFT", 4, -4)
 end
 
 function Settings.RefreshGuide()
     if not panelCheck then return end
     panelCheck:SetChecked(ns.Coach and ns.Coach.IsPanelShown() or false)
     alertCheck:SetChecked(ns.UI.GetDB().moveAlert ~= false)
+    heatCheck:SetChecked(ns.UI.GetDB().mapHeat ~= false)
+    routeCheck:SetChecked(ns.UI.GetDB().mapRoute ~= false)
 end
 
 local function RefreshKillTime()
@@ -277,7 +355,7 @@ local function BuildKillTime(page)
     statusTitle:SetPoint("TOPLEFT", previousDesc, "BOTTOMLEFT", -(LABEL_INDENT + 2), -18)
     killStatus = Label(page, "", "GameFontHighlight")
     killStatus:SetPoint("TOPLEFT", statusTitle, "BOTTOMLEFT", 0, -6)
-    killStatus:SetTextColor(0.6, 0.85, 1)
+    ns.Theme.Text(killStatus, "teal")
 
     killStats = Paragraph(page, "", killStatus, -4)
 
@@ -316,13 +394,13 @@ local function BuildAccuracy(page)
     local restedDesc = Paragraph(page, L.SET_RESTED_DESC, restedTitle)
     restedStatus = Label(page, "", "GameFontHighlight")
     restedStatus:SetPoint("TOPLEFT", restedDesc, "BOTTOMLEFT", 0, -6)
-    restedStatus:SetTextColor(0.4, 0.6, 1)
+    ns.Theme.Text(restedStatus, "rested")
 
     local calTitle = SectionTitle(page, L.SET_CAL_TITLE, restedStatus, -18)
     local calDesc = Paragraph(page, L.SET_CAL_DESC, calTitle)
     calibrationStatus = Label(page, "", "GameFontHighlight")
     calibrationStatus:SetPoint("TOPLEFT", calDesc, "BOTTOMLEFT", 0, -6)
-    calibrationStatus:SetTextColor(0.6, 0.85, 1)
+    ns.Theme.Text(calibrationStatus, "teal")
 
     local reset = ns.UI.CreateButton(page, 170, L.SET_CAL_RESET, function()
         if ns.Calibration then ns.Calibration.Reset() end
@@ -350,7 +428,7 @@ local function BuildAbout(page)
 
     local license = Label(page, string.format(L.SET_LICENSE, Metadata("X-License") or "?"), "GameFontHighlightSmall")
     license:SetPoint("TOPLEFT", author, "BOTTOMLEFT", 0, -2)
-    license:SetTextColor(0.65, 0.65, 0.65)
+    ns.Theme.Text(license, "inkMuted")
 
     local spacer = Label(page, "")
     spacer:SetPoint("TOPLEFT", logo, "BOTTOMLEFT", 0, -6)
@@ -406,6 +484,7 @@ local function SelectTab(key)
         minimapCheck:SetChecked(not (db.minimap and db.minimap.hide))
         local choice = db.language or "auto"
         for k, b in pairs(languageButtons or {}) do b:SetChecked(k == choice) end
+        RefreshLook()
     end
 end
 
@@ -425,19 +504,7 @@ local function CreateSettingsFrame()
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     UI.ApplyBackdrop(frame, C.bg, C.border, 16)
 
-    local titleBg = UI.SolidTexture(frame, "BORDER", C.titleBg)
-    titleBg:SetPoint("TOPLEFT", 4, -4)
-    titleBg:SetPoint("TOPRIGHT", -4, -4)
-    titleBg:SetHeight(30)
-
-    local titleIcon = frame:CreateTexture(nil, "OVERLAY")
-    titleIcon:SetTexture(ns.ICON)
-    titleIcon:SetSize(22, 22)
-    titleIcon:SetPoint("LEFT", titleBg, "LEFT", 8, 0)
-
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("LEFT", titleIcon, "RIGHT", 6, 0)
-    title:SetText(L.SET_TITLE)
+    ns.Theme.Banner(frame, L.SET_TITLE, "compass")
 
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 0, 0)

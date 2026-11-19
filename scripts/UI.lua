@@ -9,13 +9,12 @@ local ROW_COUNT = 8
 local ROW_HEIGHT = 50
 local ROW_GAP = 4
 local WIDTH = 620
-local HEADER_HEIGHT = 112
+local HEADER_HEIGHT = 128
 local FOOTER_HEIGHT = 44
 local HEIGHT = HEADER_HEIGHT + ROW_COUNT * (ROW_HEIGHT + ROW_GAP) + FOOTER_HEIGHT
 local TOOLTIP_QUESTS = 12
 local REFRESH_DELAY = 2
 
-local BAR_TEXTURE = "Interface\\TargetingFrame\\UI-StatusBar"
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 local FACTION_ICON = {
     Alliance = "Interface\\TargetingFrame\\UI-PVP-Alliance",
@@ -27,9 +26,9 @@ local C = {
     bg = { 0.04, 0.04, 0.06, 0.94 },
     border = { 0.78, 0.62, 0.28, 1 },
     titleBg = { 0.16, 0.11, 0.04, 0.9 },
-    rowBg = { 1, 1, 1, 0.035 },
-    rowBgAlt = { 1, 1, 1, 0.06 },
-    rowCurrent = { 1, 0.82, 0, 0.12 },
+    rowBg = ns.Theme.colors.row,
+    rowBgAlt = ns.Theme.colors.rowAlt,
+    rowCurrent = ns.Theme.colors.rowHere,
     gold = { 1, 0.82, 0 },
     xp = { 0.58, 0.0, 0.55 },
     rested = { 0.0, 0.39, 0.88 },
@@ -183,29 +182,14 @@ local function SolidTexture(parent, layer, color)
     return tex
 end
 
-local function ApplyBackdrop(f, bg, border, edgeSize)
-    if not f.SetBackdrop then return end
-    f:SetBackdrop({
-        bgFile = WHITE,
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = false, edgeSize = edgeSize or 14,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    f:SetBackdropColor(bg[1], bg[2], bg[3], bg[4] or 1)
-    f:SetBackdropBorderColor(border[1], border[2], border[3], border[4] or 1)
+--- Window skin (Theme.lua); bg's alpha is the window's opacity. border and edgeSize are
+--- kept for callers but the theme draws its own frame.
+local function ApplyBackdrop(f, bg)
+    ns.Theme.Window(f, bg and bg[4])
 end
 
 local function CreateBar(parent, height, color)
-    local bar = CreateFrame("StatusBar", nil, parent)
-    bar:SetHeight(height)
-    bar:SetStatusBarTexture(BAR_TEXTURE)
-    bar:SetStatusBarColor(color[1], color[2], color[3])
-    bar:SetMinMaxValues(0, 1)
-    bar:SetValue(0)
-    local bg = SolidTexture(bar, "BACKGROUND", C.barBg)
-    bg:SetAllPoints()
-    bar.bg = bg
-    return bar
+    return ns.Theme.Bar(parent, height, color)
 end
 
 local function CreateButton(parent, width, text, onClick)
@@ -492,11 +476,13 @@ local function RenderHeader()
 
     xpBar:SetValue(cur / maxXP)
     restedBar:SetValue(math.min((cur + (rested or 0)) / maxXP, 1))
-    xpText:SetText(string.format(L.XP_LINE, FormatNumber(cur), FormatNumber(maxXP),
-        math.floor(cur / maxXP * 100), FormatNumber(maxXP - cur)))
+    local line = string.format(L.XP_LINE, FormatNumber(cur), FormatNumber(maxXP),
+        math.floor(cur / maxXP * 100), FormatNumber(maxXP - cur))
+    if (rested or 0) > 0 then line = line .. "   " .. ns.Theme.Inline("moon", 12) .. " " .. FormatNumber(rested) end
+    xpText:SetText(line)
 
     local here = CurrentZoneName()
-    zoneText:SetText(here and string.format(L.CURRENT_ZONE, here) or "")
+    zoneText:SetText(here and (ns.Theme.Inline("pin", 14) .. " " .. string.format(L.CURRENT_ZONE, here)) or "")
 end
 
 local function RenderFactionButton()
@@ -518,14 +504,17 @@ local function CountStatuses(zone)
     return counts
 end
 
+--- Colour code for text on the parchment window.
+local function PaperHex(color) return Hex(ns.Theme.Paper(color)) end
+
 local function ChipText(counts)
     local parts = {}
-    if counts.ready > 0 then parts[#parts + 1] = Hex(STATUS_COLOR.ready) .. string.format(L.CHIP_READY, counts.ready) .. "|r" end
-    if counts.active > 0 then parts[#parts + 1] = Hex(STATUS_COLOR.active) .. string.format(L.CHIP_ACTIVE, counts.active) .. "|r" end
+    if counts.ready > 0 then parts[#parts + 1] = PaperHex(STATUS_COLOR.ready) .. string.format(L.CHIP_READY, counts.ready) .. "|r" end
+    if counts.active > 0 then parts[#parts + 1] = PaperHex(STATUS_COLOR.active) .. string.format(L.CHIP_ACTIVE, counts.active) .. "|r" end
     local fresh = counts.avail
-    if fresh > 0 then parts[#parts + 1] = Hex(STATUS_COLOR.avail) .. string.format(L.CHIP_AVAIL, fresh) .. "|r" end
+    if fresh > 0 then parts[#parts + 1] = PaperHex(STATUS_COLOR.avail) .. string.format(L.CHIP_AVAIL, fresh) .. "|r" end
     local later = counts.chain + counts.soon
-    if later > 0 then parts[#parts + 1] = Hex(STATUS_COLOR.chain) .. string.format(L.CHIP_LATER, later) .. "|r" end
+    if later > 0 then parts[#parts + 1] = PaperHex(STATUS_COLOR.chain) .. string.format(L.CHIP_LATER, later) .. "|r" end
     return table.concat(parts, "   ")
 end
 
@@ -537,13 +526,13 @@ local function RenderRow(row, rank, zone, remaining, currentZone)
     local rankColor = RANK_COLOR[rank] or C.muted
     row.rank:SetText(rank)
     row.rank:SetTextColor(rankColor[1], rankColor[2], rankColor[3])
-    row.rankRing:SetVertexColor(rankColor[1] * 0.35, rankColor[2] * 0.35, rankColor[3] * 0.35, rank <= 3 and 0.95 or 0.6)
+    row.rankRing:SetTexture(ns.Theme.Medal(rank))
 
     -- Zone name and level range
     row.name:SetText(zone.name)
     if zone.minLevel then
         local lo, hi = zone.minLevel, zone.maxLevel or zone.minLevel
-        local text = lo == hi and tostring(lo) or (Hex(LevelColor(lo)) .. lo .. "|r-" .. Hex(LevelColor(hi)) .. hi .. "|r")
+        local text = lo == hi and tostring(lo) or (PaperHex(LevelColor(lo)) .. lo .. "|r-" .. PaperHex(LevelColor(hi)) .. hi .. "|r")
         row.levels:SetText(string.format(L.LEVEL_RANGE, text))
     else
         row.levels:SetText("")
@@ -565,7 +554,7 @@ local function RenderRow(row, rank, zone, remaining, currentZone)
 
     local chips = ChipText(CountStatuses(zone))
     if zone.huntRating then
-        chips = chips .. "   " .. Hex(HUNT_COLOR[zone.huntRating]) .. string.format(L.CHIP_HUNT, L["HUNT_" .. zone.huntRating:upper()]) .. "|r"
+        chips = chips .. "   " .. ns.Theme.Inline("swords", 12) .. PaperHex(HUNT_COLOR[zone.huntRating]) .. string.format(L.CHIP_HUNT, L["HUNT_" .. zone.huntRating:upper()]) .. "|r"
     end
     row.chips:SetText(chips)
 
@@ -574,6 +563,7 @@ local function RenderRow(row, rank, zone, remaining, currentZone)
     else
         row.time:SetText("")
     end
+    row.timeIcon:SetShown(zone.routeTime ~= nil)
 
     -- Highlight the zone the player is standing in
     local isHere = currentZone and zone.name == currentZone
@@ -689,6 +679,9 @@ end
 -- Frame construction
 ---------------------------------------------------------------------------------------------
 
+-- Ink version of a game font, for text on the parchment window.
+local INK = ns.Theme.Font
+
 local function CreateRow(parent, index)
     local row = CreateFrame("Button", nil, parent)
     row:SetSize(WIDTH - 28, ROW_HEIGHT)
@@ -699,48 +692,51 @@ local function CreateRow(parent, index)
 
     local highlight = row:CreateTexture(nil, "HIGHLIGHT")
     highlight:SetTexture(WHITE)
-    highlight:SetVertexColor(1, 1, 1, 0.07)
+    local hover = ns.Theme.colors.rowHover
+    highlight:SetVertexColor(hover[1], hover[2], hover[3], hover[4])
     highlight:SetAllPoints()
 
     -- Left accent stripe shown for the current zone
-    row.here = SolidTexture(row, "ARTWORK", { C.gold[1], C.gold[2], C.gold[3], 0.9 })
+    row.here = SolidTexture(row, "ARTWORK", { 0.70, 0.48, 0.12, 0.95 })
     row.here:SetPoint("TOPLEFT")
     row.here:SetPoint("BOTTOMLEFT")
     row.here:SetWidth(3)
     row.here:Hide()
 
-    -- Rank badge: a tinted disc with the number inside (the portrait mask is a plain circle)
+    -- Rank badge: a medal (gold, silver, bronze, then iron) with the number inside
     row.rankRing = row:CreateTexture(nil, "ARTWORK")
-    row.rankRing:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask")
-    row.rankRing:SetSize(34, 34)
-    row.rankRing:SetPoint("LEFT", 8, 0)
+    row.rankRing:SetSize(42, 42)
+    row.rankRing:SetPoint("LEFT", 4, 0)
     row.rank = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    row.rank:SetPoint("CENTER", row.rankRing, "CENTER", 0, 0)
+    row.rank:SetPoint("CENTER", row.rankRing, "CENTER", 0, 3)
 
-    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    row.name = row:CreateFontString(nil, "OVERLAY", INK("GameFontNormalLarge"))
     row.name:SetPoint("TOPLEFT", row.rankRing, "TOPRIGHT", 10, -1)
     row.name:SetJustifyH("LEFT")
-    row.name:SetTextColor(1, 1, 1)
 
-    row.levels = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.levels = row:CreateFontString(nil, "OVERLAY", INK("GameFontHighlightSmall"))
     row.levels:SetPoint("LEFT", row.name, "RIGHT", 8, -1)
 
-    row.xp = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.xp = row:CreateFontString(nil, "OVERLAY", INK("GameFontHighlightSmall"))
     row.xp:SetPoint("TOPRIGHT", -10, -7)
     row.xp:SetJustifyH("RIGHT")
+    local star = ns.Theme.Icon(row, "star", 14, "OVERLAY")
+    star:SetPoint("RIGHT", row.xp, "LEFT", -3, 0)
 
-    row.chips = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.chips = row:CreateFontString(nil, "OVERLAY", INK("GameFontHighlightSmall"))
     row.chips:SetPoint("BOTTOMLEFT", row.rankRing, "BOTTOMRIGHT", 10, 3)
     row.chips:SetJustifyH("LEFT")
 
     row.bar = CreateBar(row, 6, C.zoneBar)
-    row.bar:SetPoint("BOTTOMRIGHT", -10, 8)
+    row.bar:SetPoint("BOTTOMRIGHT", -12, 9)
     row.bar:SetWidth(110)
 
-    row.time = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.time = row:CreateFontString(nil, "OVERLAY", INK("GameFontHighlightSmall"))
     row.time:SetPoint("RIGHT", row.bar, "LEFT", -8, 0)
     row.time:SetJustifyH("RIGHT")
-    row.time:SetTextColor(0.8, 0.9, 1)
+    ns.Theme.Text(row.time, "teal")
+    row.timeIcon = ns.Theme.Icon(row, "hourglass", 14, "OVERLAY")
+    row.timeIcon:SetPoint("RIGHT", row.time, "LEFT", -2, 0)
 
     row:SetScript("OnEnter", ShowZoneTooltip)
     row:SetScript("OnClick", function(self)
@@ -777,59 +773,41 @@ local function CreateMainFrame()
         frame:SetPoint("CENTER")
     end
 
-    -- Title bar
-    local titleBg = SolidTexture(frame, "BORDER", C.titleBg)
-    titleBg:SetPoint("TOPLEFT", 4, -4)
-    titleBg:SetPoint("TOPRIGHT", -4, -4)
-    titleBg:SetHeight(30)
-    local titleLine = SolidTexture(frame, "ARTWORK", { C.border[1], C.border[2], C.border[3], 0.6 })
-    titleLine:SetPoint("TOPLEFT", titleBg, "BOTTOMLEFT")
-    titleLine:SetPoint("TOPRIGHT", titleBg, "BOTTOMRIGHT")
-    titleLine:SetHeight(1)
-
-    local titleIcon = frame:CreateTexture(nil, "OVERLAY")
-    titleIcon:SetTexture(ns.ICON)
-    titleIcon:SetSize(22, 22)
-    titleIcon:SetPoint("LEFT", titleBg, "LEFT", 8, 0)
-
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("LEFT", titleIcon, "RIGHT", 6, 0)
-    title:SetText(L.TITLE)
+    -- Title: a parchment banner on the top edge
+    ns.Theme.Banner(frame, L.TITLE, "compass")
 
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", 0, 0)
 
     -- Player summary
-    playerText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    playerText = frame:CreateFontString(nil, "OVERLAY", INK("GameFontHighlight"))
     playerText:SetPoint("TOPLEFT", 16, -44)
 
-    zoneText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    zoneText = frame:CreateFontString(nil, "OVERLAY", INK("GameFontNormalSmall"))
     zoneText:SetPoint("TOPRIGHT", -16, -46)
     zoneText:SetJustifyH("RIGHT")
 
-    restedBar = CreateBar(frame, 16, C.rested)
-    restedBar:SetPoint("TOPLEFT", 16, -64)
-    restedBar:SetPoint("TOPRIGHT", -16, -64)
-    restedBar:SetAlpha(0.55)
+    restedBar = CreateBar(frame, 14, C.rested)
+    restedBar:SetPoint("TOPLEFT", 22, -68)
+    restedBar:SetPoint("TOPRIGHT", -22, -68)
+    local restedFill = restedBar:GetStatusBarTexture()
+    if restedFill then restedFill:SetAlpha(0.55) end
 
-    xpBar = CreateBar(frame, 16, C.xp)
+    xpBar = CreateBar(frame, 14, C.xp)
     xpBar:SetAllPoints(restedBar)
-    xpBar.bg:Hide() -- the rested bar underneath already draws the background
+    xpBar.bg:Hide() -- the rested bar underneath already draws the frame
     xpBar:SetFrameLevel(restedBar:GetFrameLevel() + 1)
-
-    local xpBorder = CreateFrame("Frame", nil, xpBar, BackdropTemplateMixin and "BackdropTemplate" or nil)
-    xpBorder:SetPoint("TOPLEFT", -3, 3)
-    xpBorder:SetPoint("BOTTOMRIGHT", 3, -3)
-    if xpBorder.SetBackdrop then
-        xpBorder:SetBackdrop({ edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 10 })
-        xpBorder:SetBackdropBorderColor(0.5, 0.5, 0.5, 0.9)
-    end
 
     xpText = xpBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     xpText:SetPoint("CENTER", xpBar, "CENTER", 0, 0)
 
-    local sectionTitle = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sectionTitle:SetPoint("TOPLEFT", 16, -90)
+    local headerLine = ns.Theme.Divider(frame)
+    headerLine:SetPoint("LEFT", 14, 0)
+    headerLine:SetPoint("RIGHT", -14, 0)
+    headerLine:SetPoint("TOP", 0, -92)
+
+    local sectionTitle = frame:CreateFontString(nil, "OVERLAY", INK("GameFontNormal"))
+    sectionTitle:SetPoint("TOPLEFT", 16, -110)
     sectionTitle:SetText(L.SECTION_TITLE)
 
     sortButton = CreateButton(frame, 150, L.SORT_TOTAL, function()
@@ -839,7 +817,7 @@ local function CreateMainFrame()
     end)
     sortButton:SetFrameLevel(frame:GetFrameLevel() + 5)
     sortButton:SetHeight(20)
-    sortButton:SetPoint("TOPRIGHT", -14, -86)
+    sortButton:SetPoint("TOPRIGHT", -14, -106)
 
     -- Next-steps panel and session report (Coach.lua)
     local sessionButton = CreateButton(frame, 96, L.BTN_SESSION, function()
@@ -859,10 +837,9 @@ local function CreateMainFrame()
     for i = 1, ROW_COUNT do rows[i] = CreateRow(frame, i) end
 
     -- Footer
-    local footerLine = SolidTexture(frame, "ARTWORK", { C.border[1], C.border[2], C.border[3], 0.35 })
-    footerLine:SetPoint("BOTTOMLEFT", 10, FOOTER_HEIGHT - 4)
-    footerLine:SetPoint("BOTTOMRIGHT", -10, FOOTER_HEIGHT - 4)
-    footerLine:SetHeight(1)
+    local footerLine = ns.Theme.Divider(frame)
+    footerLine:SetPoint("BOTTOMLEFT", 10, FOOTER_HEIGHT - 8)
+    footerLine:SetPoint("BOTTOMRIGHT", -10, FOOTER_HEIGHT - 8)
 
     local refreshButton = CreateButton(frame, 90, L.REFRESH, Refresh)
     refreshButton:SetPoint("BOTTOMRIGHT", -14, 12)
@@ -882,7 +859,7 @@ local function CreateMainFrame()
     factionIcon:SetSize(30, 30)
     factionIcon:SetPoint("RIGHT", factionButton, "LEFT", 4, -4)
 
-    statusText = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    statusText = frame:CreateFontString(nil, "OVERLAY", INK("GameFontDisableSmall"))
     statusText:SetPoint("BOTTOMLEFT", 16, 18)
     statusText:SetPoint("RIGHT", factionIcon, "LEFT", -6, 0)
     statusText:SetJustifyH("LEFT")
@@ -891,6 +868,11 @@ local function CreateMainFrame()
     progressBar:SetPoint("BOTTOMLEFT", statusText, "TOPLEFT", 0, 3)
     progressBar:SetWidth(180)
     progressBar:Hide()
+
+    -- Rows carry inline colours that depend on the theme mode.
+    ns.Theme.OnChange(function()
+        if frame:IsShown() then RenderResults(lastList) end
+    end)
 
     tinsert(UISpecialFrames, "ZoneXPAdvisorFrame") -- close with Escape
     frame:SetScript("OnShow", Refresh)

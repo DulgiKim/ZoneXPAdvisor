@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0
+
+### English
+- World map heat: on a continent map the 10 best zones by XP per hour are tinted from red to green, each with a rank medal and its rate. Hover one for its total XP and time, click it to open the zone.
+- World map route: on a zone map the next stops of your route are drawn as numbered points joined by lines, with a pin on the next stop and a line from you to it. Click a stop to set a waypoint. Both can be turned off in Settings > Guide.
+- New look: every window is a parchment sheet in a teal frame with brass lines, with a framed title plate, brass dividers, slate progress bars, rank medals (gold, silver, bronze, iron) and new icons.
+- Dark mode and opacity: Settings > General > Window look switches between parchment and dark (light text on slate paper) and sets the window opacity (30-100%; parchment stays at 60% or more so the dark text stays readable). Changes apply right away.
+- Restart the game after updating (new files are not read by /reload).
+
+### 한국어
+- 세계 지도 효율 표시: 대륙 지도에서 시간당 경험치가 높은 지역 10곳을 빨강에서 초록까지 색칠하고, 순위 메달과 시간당 경험치를 표시합니다. 마우스를 올리면 총 경험치와 시간이 나오고, 클릭하면 그 지역 지도를 엽니다.
+- 세계 지도 동선: 지역 지도에 동선의 다음 경유지를 번호와 선으로 그리고, 다음 경유지에 핀을 꽂고 내 위치에서 이어 줍니다. 경유지를 클릭하면 목적지를 표시합니다. 두 기능 모두 설정 > 가이드에서 끌 수 있습니다.
+- 새 디자인: 모든 창을 청록 테두리와 놋쇠 선 안의 양피지로 바꾸고, 테두리가 있는 제목판, 놋쇠 구분선, 슬레이트 진행 바, 순위 메달(금·은·동·철)과 새 아이콘을 넣었습니다.
+- 다크 모드와 불투명도: 설정 > 일반 > 창 모양에서 양피지와 다크(어두운 종이에 밝은 글자)를 고르고 창 불투명도(30~100%)를 정합니다. 양피지는 진한 글자가 잘 읽히도록 60% 아래로 내려가지 않습니다. 바꾸면 바로 적용됩니다.
+- 업데이트 후에는 게임을 다시 시작하세요(새 파일은 /reload로 읽히지 않습니다).
+
 ## 1.1.1
 
 ### English
