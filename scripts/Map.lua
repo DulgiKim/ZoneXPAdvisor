@@ -6,6 +6,8 @@
 --   * Zone maps: the planned route of that zone, as numbered stops joined by a line (the next
 --     stop strong, later ones fading), plus a line from the player to the next stop. Clicking
 --     a stop sets a waypoint, like the next-steps panel.
+--   * A small button in the map's top-right corner turns the drawing of the map shown (heat on
+--     continents, route on zones) off and on; same options as Settings > Guide > World map.
 -- Our frames sit on the map's canvas and only read the map (no data provider or pin pool), so
 -- nothing of the map's own code is touched.
 
@@ -116,7 +118,7 @@ end
 -- Frames on the canvas
 ---------------------------------------------------------------------------------------------
 
-local canvas, overlay, top
+local canvas, overlay, top, toggle
 local tints, badges, lines, stops = {}, {}, {}, {}
 local playerLine, routeZone, firstStop
 local refreshPending
@@ -389,6 +391,67 @@ local function DrawRoute(zone, inv)
 end
 
 ---------------------------------------------------------------------------------------------
+-- On/off button
+---------------------------------------------------------------------------------------------
+
+--- The option the map shown uses: "mapHeat" on continents, "mapRoute" on other maps.
+local function ToggleKey()
+    local mapID = WorldMapFrame.GetMapID and Call(WorldMapFrame.GetMapID, WorldMapFrame)
+    local info = mapID and Call(C_Map.GetMapInfo, mapID)
+    if not info then return nil end
+    return info.mapType == CONTINENT and "mapHeat" or "mapRoute"
+end
+
+local function UpdateToggle()
+    if not toggle then return end
+    local key = ToggleKey()
+    toggle:SetShown(key ~= nil)
+    if not key then return end
+    local on = Enabled(key)
+    toggle.icon:SetDesaturated(not on)
+    toggle.icon:SetAlpha(on and 1 or 0.5)
+end
+
+local function ShowToggleTooltip(self)
+    local key = ToggleKey()
+    if not key then return end
+    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+    GameTooltip:AddLine("ZoneXP Advisor", 1, 0.82, 0)
+    GameTooltip:AddLine(key == "mapHeat" and L.MAP_BTN_HEAT or L.MAP_BTN_ROUTE, 1, 1, 1, true)
+    GameTooltip:AddLine(Enabled(key) and L.MAP_BTN_ON or L.MAP_BTN_OFF, 0.6, 0.9, 0.6, true)
+    GameTooltip:AddLine(L.MAP_BTN_HINT, 0.6, 0.6, 0.6, true)
+    GameTooltip:Show()
+end
+
+local function CreateToggle()
+    local parent = WorldMapFrame.ScrollContainer or WorldMapFrame
+    toggle = CreateFrame("Button", nil, parent)
+    toggle:SetSize(26, 26)
+    toggle:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -6, -6)
+    toggle:SetFrameLevel(parent:GetFrameLevel() + 1000)
+    toggle.bg = toggle:CreateTexture(nil, "BACKGROUND")
+    toggle.bg:SetTexture(CIRCLE)
+    toggle.bg:SetAllPoints()
+    toggle.bg:SetVertexColor(0.04, 0.04, 0.06, 0.8)
+    toggle.icon = toggle:CreateTexture(nil, "ARTWORK")
+    toggle.icon:SetTexture(ns.Theme.Art("compass"))
+    toggle.icon:SetPoint("TOPLEFT", 3, -3)
+    toggle.icon:SetPoint("BOTTOMRIGHT", -3, 3)
+    toggle:SetHighlightTexture(CIRCLE, "ADD")
+    toggle:SetScript("OnClick", function(self)
+        local key = ToggleKey()
+        if not key then return end
+        DB()[key] = not Enabled(key)
+        if ns.Settings and ns.Settings.RefreshGuide then ns.Settings.RefreshGuide() end
+        Map.Refresh()
+        UpdateToggle()
+        ShowToggleTooltip(self)
+    end)
+    toggle:SetScript("OnEnter", ShowToggleTooltip)
+    toggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+---------------------------------------------------------------------------------------------
 -- Refresh
 ---------------------------------------------------------------------------------------------
 
@@ -396,6 +459,7 @@ local function Refresh()
     refreshPending = false
     if not (WorldMapFrame and WorldMapFrame:IsShown() and overlay) then return end
     HideAll()
+    UpdateToggle()
     local mapID = WorldMapFrame.GetMapID and Call(WorldMapFrame.GetMapID, WorldMapFrame)
     if not mapID then return end
     local list = UI().LastList() or {}
@@ -434,6 +498,7 @@ local function Attach()
     top = CreateFrame("Frame", nil, canvas)
     top:SetAllPoints(canvas)
     top:SetFrameLevel(canvas:GetFrameLevel() + 900)
+    CreateToggle()
 
     WorldMapFrame:HookScript("OnShow", Map.Refresh)
     WorldMapFrame:HookScript("OnHide", HideAll)
@@ -471,3 +536,4 @@ Map._HeatColor = HeatColor
 Map._ShortNumber = ShortNumber
 Map._Attach = Attach
 Map._RefreshNow = Refresh
+Map._Toggle = function() return toggle end

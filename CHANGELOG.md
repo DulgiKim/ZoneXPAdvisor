@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1
+
+### English
+- World map button: a compass button in the map's top-right corner hides or shows the heat (continent maps) and the route (zone maps). Same options as Settings > Guide > World map.
+
+### 한국어
+- 세계 지도 버튼: 지도 오른쪽 위 나침반 버튼으로 대륙 지도의 효율 표시와 지역 지도의 동선을 숨기거나 다시 표시합니다. 설정 > 가이드 > 세계 지도와 같은 옵션입니다.
+
 ## 1.2.0
 
 ### English
